@@ -9,7 +9,8 @@ Aquests fluxos fan amb n8n les feines que ara depenen del Mac: el Cookidoo, el c
 | `1-cuina-cookidoo.json` | Llegeix i omple «Mi semana», llegeix receptes (amb el filtre de llegum) i col·leccions, i gestiona la llista de la compra. |
 | `2-cuina-mercadona.json` | Cerca productes, llegeix el carro i hi posa o en treu productes. **No pot fer ni pagar comandes.** |
 | `3-cuina-calendari-google.json` | Crea avisos amb notificació a l'hora exacta al Google Calendar i no en repeteix cap. Substitueix l'osascript i l'iCloud. |
-| `4-cuina-eines-claude-mcp.json` | El connector: posa els 3 fluxos a disposició de Claude, protegit amb un token. |
+| `4-cuina-eines-claude-mcp.json` | El connector: posa els fluxos a disposició de Claude, protegit amb un token. A n8n també hi ha l'eina `segon_pla`. |
+| `5-cuina-segon-pla.json` | Engega la tasca programada «Cuina segon pla 2» (menú en segon pla). |
 
 ---
 
@@ -54,10 +55,12 @@ A claude.ai, ves a **Configuració → Connectors → Afegeix un connector perso
 La primera versió, amb OAuth, quedava oberta a la teva versió de n8n i es va tancar de seguida.
 
 ## Artefacte: «Fes-ho tot en segon pla»
-El botó obre una sessió de Claude Code al núvol (`create_session`, entorn «Claude-Code») amb tot l'encàrrec i les dades del formulari. Fa la feina encara que tanquis l'app i, quan acaba, envia una notificació (`PushNotification`).
-- Les sessions creades així tenen els connectors «Cuina n8n» i Notion (provat el 5-11-2026).
-- Gasta l'ús del teu pla de Claude, igual que un xat llarg.
-- La rutina «Cuina: menú i compra (en segon pla)» ja no es fa servir: la pots esborrar.
+El botó crida l'eina `segon_pla` del connector «Cuina n8n». El flux `5-cuina-segon-pla.json` («Cuina · Segon pla») posa en marxa la tasca programada **«Cuina segon pla 2»** de claude.ai/code/routines amb la seva **API**:
+- Envia les instruccions completes i les dades del formulari. Les instruccions són al node «Entrada i config»: per canviar-les, edita'l aquí, sense tocar la tasca.
+- La tasca té un prompt curt que fixa els límits (només cuina, no pagar, no enviar missatges) i té els connectors «Cuina n8n» i Notion.
+- Quan acaba, Claude envia una notificació al mòbil.
+- **Credencial:** «Claude · tasca Cuina segon pla (token)», tipus *Bearer Auth*. És el token de l'API de la tasca (`sk-ant-oat01-…`). Si el regeneres a claude.ai, actualitza'l aquí.
+- Gasta l'ús del teu pla de Claude, com un xat llarg.
 
 ## Riscos coneguts
 - **Totes dues són API internes no oficials:** el Cookidoo i el Mercadona les poden canviar sense avís.

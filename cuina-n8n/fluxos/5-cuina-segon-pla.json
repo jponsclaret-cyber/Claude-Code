@@ -1,0 +1,203 @@
+{
+  "name": "Cuina · Segon pla",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "accio"
+            },
+            {
+              "name": "dades"
+            }
+          ]
+        }
+      },
+      "id": "d5923779-41da-4eea-ac05-18e00dc632a4",
+      "name": "Quan el crida Claude",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8c447b48-8be9-4c90-aca7-3b3b8ce166f3",
+      "name": "Prova manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 1 1 *"
+            }
+          ]
+        }
+      },
+      "id": "767ff6b2-5f89-4359-a5eb-5c40abed6bcb",
+      "name": "Publicació (no fa res)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// Instruccions completes per a Claude (es poden canviar aquí sense tocar la tasca de claude.ai)\nconst INSTRUCCIONS = \"# ENCÀRREC: menú de la setmana\\nEts l'assistent de cuina d'en Jimix (Thermomix + Cookidoo). Treballes SOL, en segon pla: ell no és davant la pantalla i no et pot contestar. No facis preguntes a mig camí: fes la feina amb els supòsits d'aquí sota i deixa els dubtes per al resum final. Escriu en català, amb frases curtes.\\n\\n## Dades d'aquesta execució\\nLes dades d'aquesta execució són el JSON de la secció «DADES», al final d'aquest text. El JSON porta: setmana_dilluns (AAAA-MM-DD), persones, persones_per_apat ({dia: {dinar, sopar}}; 0 = no mengen a casa; mana per sobre de les altres regles de persones), dinars_cap_de_setmana_a_casa, plat_nou, comentari, fruita (per fruita: \\\"no\\\", \\\"poca\\\", \\\"prou\\\"), fruita_nota, fer {setmana, llista, carro, notion, calendari} i mode (\\\"real\\\" o \\\"prova\\\").\\n- Si mode és \\\"prova\\\": NOMÉS lectures. Llegeix l'estoc de Notion, les col·leccions del Cookidoo, «Mi semana» de la setmana i el carro del Mercadona, i acaba amb un resum de 4 línies que comenci per «PROVA OK» (o «PROVA AMB ERRORS»). No escriguis res enlloc.\\n- Si mode és \\\"real\\\": fes tot el que diu «Feina», només les parts amb fer.X = true.\\n\\n## Eines\\n- Les eines dels connectors poden tenir noms interns (p. ex. mcp__<id>__cookidoo). Carrega-les amb ToolSearch («cookidoo», «mercadona», «calendari», «notion-query-data-sources», «notion-update-page», «notion-create-pages», «PushNotification») abans de començar.\\n- Connector «Cuina n8n»: eines `cookidoo`, `mercadona` i `calendari`. Totes reben {\\\"accio\\\": \\\"...\\\", \\\"dades\\\": \\\"<text JSON>\\\"}. Llegeix-ne la descripció. No facis servir l'eina `segon_pla` (és la que t'ha posat en marxa).\\n- Connector «Notion»:\\n  - Per LLEGIR l'estoc fes servir SEMPRE `notion-query-data-sources` en mode \\\"view\\\" (el pla gratuït té esgotat el mode rows/SQL), seguint next_cursor fins al final:\\n    - Rebost i nevera (tot): view_url https://www.notion.so/a5e43a2bd9c34c85859a71486ae70f91?v=5c741954816a42deb053d861ade8331a (camp «Lloc»: Nevera o Rebost).\\n    - Congelador (racions > 0): view_url https://www.notion.so/a834632b74c74175ade7d48d6c9d6659?v=40b7a224ec23810c9d1d000c5137aedc\\n  - Per escriure: `notion-update-page` (update_properties) i `notion-create-pages` (parent data_source_id 242d6c01-5431-4152-8b10-94224199cf37 per al Congelador).\\n\\n## Regles de casa (no negociables)\\n- CAP LLEGUM (intolerància): ni llenties, cigrons, mongetes, pèsols, mongeta tendra, soja/tofu, cacauet, faves. Comprova cada recepta amb `cookidoo` accio \\\"receptes\\\" (camp «llegum» ha de ser false). La soja dins de botifarres o embotits sí que es pot. Els productes ⚠️ de l'estoc no es fan servir mai.\\n- Sempre primer i segon a dinar i a sopar. Un «Menú» del Cookidoo compta com a primer i segon.\\n- Sopars: sempre un «Menú» del Cookidoo (llista 00 MENU SOPAR o similars). Dilluns: creps de pernil dolç i formatge (plat únic, NO a «Mi semana»). Dimecres: menú amb truita (p. ex. r150861). Divendres, dissabte i diumenge no sopen a casa.\\n- Dinars del cap de setmana: segons dinars_cap_de_setmana_a_casa. Si dinen a casa, un dels dos dies un arròs (p. ex. paella de 03 DINAR FINDE).\\n- La verdura va al sopar; als dinars arròs, pasta, carn, guisats.\\n- Racions: plat que es congela bé → variant de 6 racions (cada variant té un rID propi); plat que no es congela (arròs, pasta, peix, ous, truita, patata a trossos) → 4 racions (o les persones). Mai «fes-ne la meitat».\\n- Ordre de gastar (molt important): ABANS de comprar res de nou, fes servir el que ja hi ha. Primer el que es fa malbé a la nevera (mira les Notes), després el congelador: el més antic primer (camp «Data») i el que n'hi ha més. Posa sobres congelades (plats cuinats) a 2 o 3 dinars. Si un plat necessita carn o peix que ja és al congelador, tria'l abans que un que obligui a comprar-ne.\\n- Peix fresc: a la Lupe (dilluns per dimarts), peix barat; plats de peix dimarts o dimecres.\\n- Àpats amb 1 o 2 persones (persones_per_apat): abans de cuinar res, fes servir racions del congelador que hi encaixin (sobres d'altres setmanes). No hi posis recepta a «Mi semana»; reserva-ho a Notion i crea l'avís de descongelar el vespre abans. Àpats amb 0: no hi posis res.\\n- Iogurt cada dilluns: recepta r55133.\\n- Plat nou: si plat_nou és true, proposa'n un que no sigui a cap de les seves llistes (cerca'l amb `cookidoo` \\\"cercar\\\"); posa'l al menú només si compleix les regles.\\n- Tingues en compte el «comentari» i la fruita que queda (unes 9-10 kg de fruita per setmana en total).\\n\\n## Feina (mode \\\"real\\\")\\n1. Llegeix l'estoc (Notion, en mode view) i les col·leccions del Cookidoo (`cookidoo` \\\"colleccions\\\").\\n2. Tria el menú de dilluns a diumenge i comprova totes les receptes amb \\\"receptes\\\".\\n3. fer.setmana: llegeix «Mi semana» d'aquella setmana per no repetir res i afegeix amb \\\"setmana_afegir\\\", per a cada dia en ordre invers (sopar 2n, sopar 1r, dinar 2n, dinar 1r). El dilluns, el iogurt r55133 primer de tot.\\n4. fer.llista: fes la llista unificada (suma i ajunta ingredients, resta l'estoc, afegeix els fixos: enciam, mozzarella en boletes, tomàquets d'amanida, pernil dolç i formatge a llesques per a les creps, esmorzars que s'acabin, el que estigui marcat «S'acaba», la fruita, 1 L de llet i 1 iogurt natural amb bífidus per al iogurt). Després \\\"llista_buidar\\\" {\\\"confirmo\\\": true} i \\\"llista_afegir\\\" amb cada article amb emoji de secció (🥬 🥩 ❄️ 🥛 🥫 🥐 🍞 🧴). El peix fresc hi va com «🐟 … (a la Lupe, no al Mercadona)».\\n5. fer.carro: `mercadona` \\\"cercar\\\" (en castellà) i \\\"habituals\\\"; tria productes (prefereix habituals i Hacendado) i fes \\\"posar\\\" amb mode \\\"minim\\\" (màxim 12 per producte). Llegeix el \\\"carro\\\": si no arriba a 60 €, NO afegeixis res més; proposa-ho al resum.\\n6. fer.notion: a les Notes de cada producte de l'estoc que el menú fa servir, afegeix una línia «📌 [quantitat] per a [plat] de [dia] D-M» (sense esborrar res del que hi ha). Per a cada plat de 6 racions, crea una fila al Congelador: «Què és» = el plat, Tipus = Plat cuinat, Racions = 0, Notes = «⏳ Previst: es congelen N racions el D-M (sobres del menú).» (N = 6 − persones).\\n7. fer.calendari: amb `calendari` \\\"crear\\\": un avís a les 20:00 del vespre abans de cada plat que necessiti descongelar («❄️ Treure del congelador: …»), i el dilluns d'aquella setmana a les 20:15 «🐟 Passa'm la llista de la Lupe al Claude», amb el peix que cal a la descripció (plat, dia i grams per a 4).\\n8. Si una eina falla, continua amb la resta i explica-ho al final.\\n\\n## Límits\\n- Mai confirmis ni paguis cap comanda: només s'omple el carro.\\n- No enviïs cap missatge en nom seu.\\n- No toquis res que no sigui el que diu aquest encàrrec.\\n\\n## Resum final (curt, per llegir al mòbil)\\nQuan acabis (també en mode prova o si hi ha errors), avisa'l amb `PushNotification`: una sola línia, p. ex. «🍳 Menú fet: carro 74 €, 3 avisos creats» o «⚠️ Menú amb errors: …». Després escriu el resum.\\nEl menú dia per dia (marca el plat nou i l'arròs), el total del carro, els avisos creats, el que no s'ha pogut fer i les preguntes pendents. Acaba amb: «Repassa el carro a tienda.mercadona.es, tria franja de dilluns al matí i paga.»\\n\";\n// ⚙️ Encarrega el menú de la setmana a la tasca programada «Cuina segon pla» de Claude.\n// L'accés és a la credencial «Claude · tasca Cuina segon pla (token)» (Bearer Auth).\nconst CONFIG = {\n  tasca: 'trig_0157uP9GsTvaLdkYfTes3r4W',\n};\nconst ent = $input.first().json;\nlet accio = String(ent.accio || '').trim();\nlet dades = llegeixDades(ent.dades);\nif (!accio) { // execució manual: una prova només de lectura per al dilluns vinent\n  const d = new Date(Date.now() + 86400000); while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() + 1);\n  accio = 'encarrega'; dades = { setmana_dilluns: d.toISOString().slice(0, 10), persones: 4, mode: 'prova', fer: {} };\n}\nif (accio !== 'encarrega') throw new Error(`Acció desconeguda: «${accio}». Vàlida: encarrega.`);\nif (!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(dades.setmana_dilluns || ''))) throw new Error('Falta «setmana_dilluns» (AAAA-MM-DD).');\nif (!['real', 'prova'].includes(dades.mode)) throw new Error('«mode» ha de ser \"real\" o \"prova\".');\nconst text = INSTRUCCIONS + '\\n\\n## DADES\\n' + JSON.stringify(dades);\nif (text.length > 30000) throw new Error('Les dades són massa llargues.');\nreturn [{ json: { ...CONFIG, url: `https://api.anthropic.com/v1/claude_code/routines/${CONFIG.tasca}/fire`, cos: JSON.stringify({ text }), mode: dades.mode, setmana: dades.setmana_dilluns } }];\n"
+      },
+      "id": "24864030-2628-4c47-a81b-fc8f038be176",
+      "name": "Entrada i config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-beta",
+              "value": "experimental-cc-routine-2026-04-01"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.cos }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "36f02d11-42cf-4c08-a890-b8dd210f0a64",
+      "name": "Encarrega a Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        100
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "",
+          "name": "Claude · tasca Cuina segon pla (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\nconst c = $('Entrada i config').first().json;\nconst r = $input.first().json;\nconst st = r && r.statusCode;\nconst b = comAJson(cosResposta(r)) || {};\nif (st === 401 || st === 403) throw new Error('Claude ha rebutjat el token de la tasca «Cuina segon pla». Genera\\'n un de nou a claude.ai/code/routines i posa\\'l a la credencial «Claude · tasca Cuina segon pla (token)».');\nif (st === 404) throw new Error('No trobo la tasca «Cuina segon pla» (potser s\\'ha esborrat).');\nif (st === 429) throw new Error('Massa encàrrecs seguits: espera uns minuts i torna-ho a provar.');\nif (!st || st >= 400) throw new Error(`Claude (encarregar la tasca): HTTP ${st}: ${JSON.stringify(b).slice(0, 300)}`);\nreturn [{ json: { ok: true, accio: 'encarrega', mode: c.mode, setmana: c.setmana, sessio: b.claude_code_session_id || '', url: b.claude_code_session_url || '' } }];\n"
+      },
+      "id": "fb6f1144-2911-4a4e-abaf-843b6197cfd0",
+      "name": "Resultat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Menú en segon pla\nPosa en marxa la tasca programada «Cuina segon pla» de Claude (claude.ai/code/routines) amb les dades del formulari de la pàgina de cuina. Claude fa el menú al núvol i t'avisa amb una notificació quan acaba.\n\n**Credencial:** «Claude · tasca Cuina segon pla (token)», tipus *Bearer Auth*: el token de l'activador API de la tasca.\n\n**Prova:** executa des del node «Prova manual». Fa una prova només de lectura (no escriu res enlloc).",
+        "width": 560,
+        "height": 300
+      },
+      "id": "fc2aff06-50b6-40f0-a78e-2e65ca3d10a9",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -360
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Quan el crida Claude": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova manual": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada i config": {
+      "main": [
+        [
+          {
+            "node": "Encarrega a Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encarrega a Claude": {
+      "main": [
+        [
+          {
+            "node": "Resultat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Europe/Madrid"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
