@@ -241,6 +241,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     { id: 'congelador', nom: 'Congelador' },
     { id: 'fruita', nom: 'Fruita' },
     { id: 'resum', nom: 'Resum' },
+    { id: 'menu', nom: 'Menú i compra' },
   ];
 
   const S = {
@@ -386,6 +387,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const p = $('panel');
     if (S.tab === 'fruita') p.innerHTML = renderFruita();
     else if (S.tab === 'resum') p.innerHTML = renderResum();
+    else if (S.tab === 'menu') p.innerHTML = renderMenu();
     else p.innerHTML = renderZona(S.tab);
     renderSavebar();
   }
@@ -718,6 +720,342 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   $('fotos').addEventListener('change', (e) => {
     fotos = [...e.target.files];
     $('assistInfo').textContent = fotos.length ? `${fotos.length} foto${fotos.length === 1 ? '' : 's'} preparada${fotos.length === 1 ? '' : 'es'}.` : '';
+  });
+
+  // ── Menú i compra ──────────────────────────────────────
+  const N8N = 'Cuina n8n';
+  const DIES_NOM = ['Dg', 'Dl', 'Dt', 'Dc', 'Dj', 'Dv', 'Ds'];
+  const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const deIso = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d, 12); };
+  const mesDies = (s, n) => { const d = deIso(s); d.setDate(d.getDate() + n); return isoLocal(d); };
+  const dm = (s) => { const d = deIso(s); return `${d.getDate()}-${d.getMonth() + 1}`; };
+  const nomDia = (s) => `${DIES_NOM[deIso(s).getDay()]} ${dm(s)}`;
+  const properDilluns = () => { const d = new Date(); d.setHours(12); do { d.setDate(d.getDate() + 1); } while (d.getDay() !== 1); return isoLocal(d); };
+  S.menu = {
+    fase: 'config', dilluns: properDilluns(), persones: 4, findeCasa: true, platNou: true, comentari: '',
+    proposta: null, log: [], passos: [], cache: {}, carro: null, error: '',
+    fer: { setmana: true, llista: true, carro: true, notion: true, calendari: true },
+  };
+
+  async function n8n(eina, accio, dades) {
+    const r = await mcp.callTool(N8N, eina, { accio, dades: JSON.stringify(dades || {}) }, { cache: false });
+    let p = payloadDe(r);
+    if (Array.isArray(p)) p = p[0];
+    if (!p || typeof p !== 'object') throw new Error(`${eina}: resposta inesperada`);
+    if (p.ok === false) throw new Error(p.error || `${eina}: error`);
+    return p;
+  }
+  const errText = (e, eina) => {
+    const c = e && e.code;
+    if (c === 'server_not_connected' || c === 'server_not_found') return `El connector «${N8N}» no està connectat al teu compte.`;
+    if (c === 'not_in_manifest' || c === 'approval_required') return `Cal que permetis a aquesta pàgina fer servir «${N8N}» (torna-ho a provar i accepta-ho).`;
+    if (c === 'needs_reauth') return `Cal tornar a connectar «${N8N}» a claude.ai → Configuració → Connectors.`;
+    return `${eina}: ${String((e && e.message) || e).slice(0, 240)}`;
+  };
+  function logMenu(t) { S.menu.log.push(t); if (S.menu.log.length > 30) S.menu.log.shift(); if (S.tab === 'menu') render(); }
+
+  // Eines que Claude pot fer servir mentre tria el menú (s'executen aquí, a la pàgina)
+  function einesMenu() {
+    return [
+      {
+        name: 'receptes',
+        description: 'Llegeix receptes del Cookidoo pel seu rID: títol, racions, temps, ingredients, «llegum» (ingredients que coincideixen amb el filtre de llegum, o false) i variants de racions (altres rID). Passa-hi totes les candidates d\'una vegada (fins a 20).',
+        inputSchema: { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } } }, required: ['ids'] },
+        async execute(input) {
+          const ids = [...new Set((input.ids || []).map(String))].slice(0, 20);
+          logMenu(`Llegint ${ids.length} recepte${ids.length === 1 ? '' : 's'} del Cookidoo…`);
+          const r = await n8n('cookidoo', 'receptes', { ids, variants: true });
+          for (const x of r.resultat || []) S.menu.cache[x.id] = x;
+          let n = 25;
+          const fes = () => (r.resultat || []).map((x) => ({ id: x.id, titol: x.titol, racions: x.racions, tempsTotalMin: x.tempsTotalMin, llegum: x.llegum, variants: x.variants, ingredients: (x.ingredients || []).slice(0, n) }));
+          let res = fes();
+          while (JSON.stringify(res).length > 30000 && n > 5) { n -= 5; res = fes(); }
+          return res;
+        },
+      },
+      {
+        name: 'cercar_receptes',
+        description: 'Cerca receptes al catàleg del Cookidoo (per al plat nou de la setmana o per trobar la variant de racions bona). Torna rID i títol.',
+        inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+        async execute(input) {
+          logMenu(`Cercant «${String(input.text).slice(0, 40)}» al Cookidoo…`);
+          const r = await n8n('cookidoo', 'cercar', { text: String(input.text), mida: 12 });
+          return r.resultat;
+        },
+      },
+    ];
+  }
+
+  function reglesCasa(m) {
+    return [
+      `Persones: ${m.persones} a cada àpat.`,
+      'CAP LLEGUM (intolerància): ni llenties, cigrons, mongetes, pèsols, mongeta tendra, soja/tofu, cacauet, faves. Comprova SEMPRE cada recepta amb l\'eina «receptes»: «llegum» ha de ser false. La soja dins de botifarres o embotits sí que es pot. Els productes marcats ⚠️ a l\'estoc no s\'han de fer servir mai.',
+      'Sempre primer i segon, a dinar i a sopar. Un «Menú» del Cookidoo (diversos plats alhora amb el Varoma) compta com a primer i segon.',
+      'Sopars: sempre un «Menú» del Cookidoo (llista 00 MENU SOPAR o similars). Dilluns sopar: creps de pernil dolç i formatge (plat únic, NO és cap recepta: posa-ho a «soparText»). Dimecres sopar: un menú amb truita (p. ex. r150861). Divendres, dissabte i diumenge NO sopen a casa («soparText»: "Fora").',
+      'Menús de sopar sense llegum ja comprovats: r45051, r449153, r150861, r55769, r111056, r34721, r562826, r929155, r716986, r802047, r721284, r699200, r145066, r29525.',
+      m.findeCasa ? 'Dinars del cap de setmana: dinen a casa. Un dels dos dies, un arròs (p. ex. una paella de 03 DINAR FINDE).' : 'Dinars del cap de setmana: NO dinen a casa (no hi posis res).',
+      'La verdura va al sopar. Als dinars: arròs, pasta, carn, guisats…',
+      'Racions: plat que es congela bé (guisats, carn amb salsa, cremes, mandonguilles) → variant de 6 racions (les sobres van al congelador). Plat que no es congela (arròs, pasta, peix, ous, truita, patata a trossos) → 4 racions (o les persones). Tria la variant de racions bona (cada variant té un rID propi); mai «fes-ne la meitat».',
+      'Ordre de gastar: primer el que es fa malbé a la nevera, després el congelat més antic i el que n\'hi ha més. Posa en algun dinar les sobres congelades (plats cuinats) d\'altres setmanes.',
+      'Peix fresc: es compra a la Lupe el dilluns i arriba dimarts. Els plats de peix fresc, dimarts o dimecres. Peix barat (maira, seitó, sardina, bonítol, orada, verat, llobarro, calamarcets, musclo).',
+      'No repeteixis plats dins la setmana. Fes servir les llistes de la família; mira els temps (entre setmana, plats de menys d\'una hora).',
+      m.platNou ? 'Plat nou: proposa UN plat que no sigui a cap de les seves llistes (cerca\'l amb «cercar_receptes»), que compleixi les regles i encaixi en un àpat concret. Marca\'l a «platNou».' : 'Aquesta setmana no cal plat nou.',
+    ].map((x) => '- ' + x).join('\n');
+  }
+
+  async function proposaMenu() {
+    const m = S.menu;
+    m.fase = 'pensant'; m.log = []; m.error = ''; m.proposta = null; render();
+    try {
+      if (!mcp) throw new Error('Aquesta vista no pot fer servir els connectors.');
+      if (!sample) throw new Error('Claude no està disponible en aquesta vista.');
+      const lim = await sample.limits().catch(() => null);
+      if (!lim || !lim.tools) throw new Error('Aquesta vista de Claude no admet eines; obre la pàgina a claude.ai.');
+      logMenu('Llegint les teves llistes del Cookidoo…');
+      const col = await n8n('cookidoo', 'colleccions', {});
+      const llistes = (col.resultat || []).filter((l) => /men[uú]|dinar|sopar|finde|croquet|arr[oò]s|paella/i.test(l.titol));
+      const textLlistes = (llistes.length ? llistes : col.resultat || []).map((l) => `## ${l.titol}\n` + l.receptes.map((r) => `${r.id} | ${r.titol}${r.tempsTotalMin ? ` | ${r.tempsTotalMin} min` : ''}`).join('\n')).join('\n\n').slice(0, 60000);
+      const { out, claus } = compactaEstoc();
+      m.claus = claus; // les claus k de les reserves es fixen ara
+      const dies = Array.from({ length: 7 }, (_, i) => mesDies(m.dilluns, i));
+      const fruita = FRUITES.map((f) => `${f}: ${S.fruita[f] === 'no' ? 'no en queda' : S.fruita[f] === 'poca' ? 'poca' : S.fruita[f] === 'prou' ? 'prou' : 'no ho sé'}`).join('; ');
+      const prompt = [
+        `Ets el cuiner de casa d'en Jimix (Thermomix + Cookidoo). Fes el menú de la setmana del ${nomDia(dies[0])} al ${nomDia(dies[6])} (dies: ${dies.join(', ')}). Escriu en català.`,
+        'REGLES DE CASA:', reglesCasa(m),
+        m.comentari ? `\nCOMENTARI D'EN JIMIX PER A AQUESTA SETMANA: ${m.comentari}` : '',
+        '\nESTOC ACTUAL (k = clau per a les reserves):', JSON.stringify(out),
+        `\nFRUITA: ${fruita}`,
+        '\nLLISTES DEL COOKIDOO (rID | títol | temps):', textLlistes,
+        '\nCOM HO HAS DE FER: tria candidats, comprova\'ls amb l\'eina «receptes» (llegum false, racions i variants) en una o dues crides, i ajusta. Després respon NOMÉS amb un objecte JSON:',
+        '{"dies":[{"dia":"AAAA-MM-DD","dinar":[{"id":"r…","titol":"…","racions":6,"congela":true}],"sopar":[{"id":"r…","titol":"…","racions":4,"congela":false}],"soparText":"Creps de pernil dolç i formatge"|"Fora"|null,"nota":"…"}],',
+        ' "platNou":{"id":"r…","titol":"…","dia":"AAAA-MM-DD","apat":"dinar|sopar","perque":"…"}|null,',
+        ' "reserves":[{"k":"p12","quantitat":"2 racions","plat":"…","dia":"AAAA-MM-DD"}],',
+        ' "sobres":[{"plat":"…","dia":"AAAA-MM-DD","racions":2}],',
+        ' "descongelar":[{"dia":"AAAA-MM-DD (el dia ABANS del plat)","que":"…","plat":"…"}],',
+        ' "peix":[{"plat":"…","dia":"AAAA-MM-DD","peix":"…","grams":600}],',
+        ' "avisos":["…"]}',
+        'Dinar i sopar són llistes: [primer, segon], o un sol element si és un «Menú». «reserves» = el que el menú fa servir de l\'estoc (amb la k). «sobres» = per a cada plat de 6 racions, les que sobren (6 − persones). «descongelar» = el que s\'ha de treure del congelador la nit abans.',
+      ].filter(Boolean).join('\n');
+      logMenu('Claude està triant el menú (pot trigar un parell de minuts)…');
+      const r = await sample.json(prompt, { tools: einesMenu(), modelTier: 'default' });
+      if (!r || !Array.isArray(r.dies)) throw new Error('Claude no ha tornat un menú vàlid.');
+      m.proposta = r; m.fase = 'proposta';
+      if (db) db.doc('menus/proposta').set({ data: new Date().toISOString(), dilluns: m.dilluns, proposta: JSON.stringify(r) }).catch(() => {});
+    } catch (e) {
+      m.fase = 'config';
+      const codis = { not_granted: 'No has deixat que aquesta pàgina faci servir Claude.', rate_limited: 'Massa peticions a Claude: espera una mica.', invalid_json: 'Claude no ha respost en el format esperat. Torna-ho a provar.', tools_unavailable: 'Aquesta vista no admet eines de Claude: obre-la a claude.ai.' };
+      m.error = codis[e && e.code] || errText(e, 'menú');
+    }
+    render();
+  }
+
+  function receptesDelMenu() {
+    const p = S.menu.proposta; const ids = [];
+    for (const d of p.dies || []) for (const r of [...(d.dinar || []), ...(d.sopar || [])]) if (r && r.id) ids.push(r.id);
+    return [...new Set(ids)];
+  }
+
+  async function aplicaMenu() {
+    const m = S.menu; const p = m.proposta;
+    const pas = (id, nom) => { const x = { id, nom, estat: 'pendent', detall: '' }; m.passos.push(x); return x; };
+    m.fase = 'aplicant'; m.passos = []; m.carro = null;
+    const P = {
+      setmana: m.fer.setmana && pas('setmana', '«Mi semana» del Cookidoo'),
+      llista: m.fer.llista && pas('llista', 'Llista de la compra'),
+      carro: m.fer.carro && pas('carro', 'Carro del Mercadona'),
+      notion: m.fer.notion && pas('notion', 'Notion: reserves 📌 i sobres ⏳'),
+      calendari: m.fer.calendari && pas('calendari', 'Avisos al calendari'),
+    };
+    render();
+    const fes = async (x, fn) => { if (!x) return; x.estat = 'fent'; render(); try { x.detall = await fn() || ''; x.estat = 'ok'; } catch (e) { x.estat = 'error'; x.detall = errText(e, x.nom); } render(); };
+
+    await fes(P.setmana, async () => {
+      const actual = await n8n('cookidoo', 'setmana_llegir', { data: m.dilluns, dies: 7 });
+      const ja = {}; for (const d of actual.resultat || []) ja[d.dia] = new Set((d.receptes || []).map((r) => r.id));
+      const entrades = [];
+      for (const d of p.dies || []) {
+        const ordre = [];
+        if (d.dia === m.dilluns) ordre.push('r55133'); // iogurt: el primer que s'afegeix, queda l'últim del dia
+        const plats = [...(d.dinar || []), ...(d.sopar || [])].filter((r) => r && r.id).map((r) => r.id);
+        ordre.push(...plats.reverse());
+        for (const id of ordre) if (!(ja[d.dia] && ja[d.dia].has(id))) entrades.push({ dia: d.dia, recepta: id });
+      }
+      if (!entrades.length) return 'Ja hi era tot.';
+      const r = await n8n('cookidoo', 'setmana_afegir', { entrades });
+      const ok = (r.resultat || []).filter((x) => x.ok).length;
+      return `${ok} receptes afegides.`;
+    });
+
+    let llista = null;
+    if (P.llista || P.carro) {
+      try {
+        const falten = receptesDelMenu().filter((id) => !S.menu.cache[id]);
+        if (falten.length) { const r = await n8n('cookidoo', 'receptes', { ids: falten }); for (const x of r.resultat || []) S.menu.cache[x.id] = x; }
+        const receptes = receptesDelMenu().map((id) => { const x = S.menu.cache[id] || {}; return { id, titol: x.titol, racions: x.racions, ingredients: x.ingredients || [] }; });
+        const { out } = compactaEstoc();
+        const acaben = llistaCompra();
+        const prompt = [
+          'Fes la llista de la compra unificada de la setmana per a una família (Thermomix). Escriu en català.',
+          `Persones: ${m.persones}. Menú: ${JSON.stringify(p.dies)}`,
+          'RECEPTES AMB INGREDIENTS:', JSON.stringify(receptes),
+          'ESTOC (resta el que ja hi ha amb quantitat suficient):', JSON.stringify(out),
+          `S'ACABA (s'ha de comprar): ${JSON.stringify(acaben.acaben)}`,
+          `FRUITA que cal comprar (unes 9-10 kg per setmana en total, segons el que queda): ${JSON.stringify(acaben.fruita)}${S.fruitaNota ? ' · Nota: ' + S.fruitaNota : ''}`,
+          'FIXOS CADA SETMANA: 1 bossa d\'enciam, 1 paquet de mozzarella en boletes, tomàquets d\'amanida; pernil dolç i formatge a llesques per a les creps de dilluns (a part dels de l\'esmorzar); esmorzars (pernil salat, pernil dolç, formatge a llesques, tomàquets de sucar, pa) si a l\'estoc s\'acaben; per al iogurt de dilluns: 1 L de llet i 1 iogurt natural amb bífidus.',
+          'Ajunta ingredients que són el mateix (ous, llet, formatges, cebes…), suma quantitats i arrodoneix a formats de supermercat. El peix fresc NO va al Mercadona: posa\'l a «peix».',
+          'Respon NOMÉS amb JSON: {"articles":[{"seccio":"🥬","text":"Ceba – 1 kg","cerca":"cebolla"}],"peix":[{"text":"Llobarro – 600 g (dimarts, per a …)"}]}. Seccions: 🥬 verdura i fruita, 🥩 carn, ❄️ congelats, 🥛 làctics i ous, 🥫 rebost, 🥐 esmorzars, 🍞 pa, 🧴 casa. «cerca» = paraules en castellà per buscar-ho al Mercadona.',
+        ].join('\n');
+        if (P.llista) { P.llista.estat = 'fent'; P.llista.detall = 'Claude fa la llista…'; render(); }
+        llista = await sample.json(prompt, { cache: false });
+        if (!llista || !Array.isArray(llista.articles)) throw new Error('Claude no ha tornat una llista vàlida.');
+      } catch (e) {
+        const t = errText(e, 'llista');
+        if (P.llista) { P.llista.estat = 'error'; P.llista.detall = t; }
+        if (P.carro) { P.carro.estat = 'saltat'; P.carro.detall = 'Sense llista no puc omplir el carro.'; }
+        render();
+      }
+    }
+
+    if (llista) {
+      await fes(P.llista, async () => {
+        await n8n('cookidoo', 'llista_buidar', { confirmo: true });
+        const articles = [...llista.articles.map((a) => `${a.seccio || ''} ${a.text}`.trim()), ...(llista.peix || []).map((x) => `🐟 ${x.text} (a la Lupe, no al Mercadona)`)];
+        await n8n('cookidoo', 'llista_afegir', { articles });
+        return `${articles.length} articles a la llista del Cookidoo.`;
+      });
+      await fes(P.carro, async () => {
+        const consultes = [...new Set(llista.articles.map((a) => a.cerca || a.text).filter(Boolean))].slice(0, 40);
+        P.carro.detall = `Cercant ${consultes.length} productes…`; render();
+        const [cerca, hab] = await Promise.all([n8n('mercadona', 'cercar', { consultes, max: 4 }), n8n('mercadona', 'habituals', {}).catch(() => ({ resultat: [] }))]);
+        P.carro.detall = 'Claude tria els productes…'; render();
+        const tria = await sample.json([
+          'Tria els productes del Mercadona per a aquesta llista de la compra. Respon NOMÉS JSON: {"linies":[{"id":"…","quantitat":1,"article":"…"}],"noTrobats":["…"]}.',
+          'Prefereix els que compra sovint (habituals), marca Hacendado i el format que s\'acosti més a la quantitat. «quantitat» = unitats o paquets del producte (màxim 12). No hi posis peix fresc.',
+          'LLISTA:', JSON.stringify(llista.articles),
+          'RESULTATS DE CERCA:', JSON.stringify(cerca.resultat),
+          'HABITUALS:', JSON.stringify((hab.resultat || []).slice(0, 150).map((x) => ({ id: x.id, nom: x.nom, format: x.format }))),
+        ].join('\n'), { cache: false });
+        const linies = (tria.linies || []).filter((l) => l && l.id).map((l) => ({ id: String(l.id), quantitat: Math.max(1, Math.min(12, Math.round(Number(l.quantitat) || 1))) }));
+        if (!linies.length) throw new Error('No he pogut triar cap producte.');
+        await n8n('mercadona', 'posar', { linies, mode: 'minim' });
+        const c = await n8n('mercadona', 'carro', {});
+        m.carro = c.resultat;
+        const total = c.resultat && c.resultat.total;
+        return `${linies.length} productes al carro · Total aproximat: ${total != null ? total.toFixed(2) + ' €' : '?'}${total != null && total < 60 ? ' ⚠️ no arriba als 60 € mínims' : ''}${(tria.noTrobats || []).length ? ` · No trobats: ${tria.noTrobats.join(', ')}` : ''}`;
+      });
+    }
+
+    await fes(P.notion, async () => {
+      const claus = m.claus || {};
+      let res = 0; let sob = 0;
+      for (const rv of p.reserves || []) {
+        const it = S.items.get(claus[rv.k]); if (!it) continue;
+        const linia = `📌 ${rv.quantitat} per a ${rv.plat} de ${nomDia(rv.dia)}`;
+        if (it.notes.includes(linia)) continue;
+        const notes = it.notes ? `${it.notes}\n${linia}` : linia;
+        await mcp.callTool(NOTION, 'notion-update-page', { page_id: it.id, command: 'update_properties', properties: { Notes: notes }, allow_async: false });
+        it.notes = notes; res++;
+      }
+      for (const s of p.sobres || []) {
+        if (!(Number(s.racions) > 0)) continue;
+        await mcp.callTool(NOTION, 'notion-create-pages', { parent: { type: 'data_source_id', data_source_id: DS.congelador.replace('collection://', '') }, pages: [{ properties: { 'Què és': s.plat, Tipus: 'Plat cuinat', Racions: 0, Notes: `⏳ Previst: es congelen ${s.racions} racions el ${dm(s.dia)} (sobres del menú).` } }], allow_async: false });
+        sob++;
+      }
+      return `${res} reserves i ${sob} sobres previstes.`;
+    });
+
+    await fes(P.calendari, async () => {
+      const esdeveniments = (p.descongelar || []).map((d) => ({ titol: `❄️ Treure del congelador: ${d.que}`, inici: `${d.dia}T20:00`, durada_min: 10, descripcio: `Passa-ho a la nevera per a ${d.plat}.`, alarma: true }));
+      if ((p.peix || []).length) {
+        esdeveniments.push({ titol: '🐟 Passa\'m la llista de la Lupe al Claude', inici: `${m.dilluns}T20:15`, durada_min: 10, alarma: true,
+          descripcio: 'Peix de la setmana (per a 4):\n' + p.peix.map((x) => `- ${x.peix}: ${x.grams || '?'} g per a ${x.plat} (${nomDia(x.dia)})`).join('\n') });
+      }
+      if (!esdeveniments.length) return 'No cal cap avís.';
+      const r = await n8n('calendari', 'crear', { esdeveniments });
+      return `${(r.creats || []).length} avisos creats${(r.repetits || []).length ? `, ${(r.repetits || []).length} ja hi eren` : ''}.`;
+    });
+
+    m.fase = 'fet';
+    if (db) db.doc('menus/ultim').set({ data: new Date().toISOString(), dilluns: m.dilluns, proposta: JSON.stringify(p), passos: m.passos.map((x) => ({ nom: x.nom, estat: x.estat, detall: x.detall })) }).catch(() => {});
+    render();
+  }
+
+  function renderMenu() {
+    const m = S.menu;
+    const capçal = `<div class="zonehead"><h2>Menú i compra</h2></div>`;
+    if (m.fase === 'config') {
+      const avisRepas = [...S.items.values()].some(brut) ? '<div class="notice">Tens canvis de l\'estoc sense desar. Desa\'ls abans perquè el menú i Notion quadrin.</div>' : '';
+      return capçal + avisRepas + `
+      <div class="card">
+        <h3>Setmana</h3>
+        <div class="add" style="background:none;padding:0;border:0">
+          <div class="fields"><label class="hint" for="mDilluns">Comença el dilluns</label><input type="date" id="mDilluns" value="${esc(m.dilluns)}"></div>
+          <div class="fields"><label class="hint" for="mPersones">Persones</label><input type="number" id="mPersones" min="1" max="8" value="${esc(m.persones)}"></div>
+          <label class="toggle"><input type="checkbox" id="mFinde" ${m.findeCasa ? 'checked' : ''}> Dinars del cap de setmana a casa</label>
+          <label class="toggle"><input type="checkbox" id="mNou" ${m.platNou ? 'checked' : ''}> Proposa un plat nou</label>
+          <textarea id="mComentari" placeholder="Alguna cosa especial aquesta setmana? (p. ex. «dijous no dinem a casa»)" style="width:100%;min-height:64px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface)">${esc(m.comentari)}</textarea>
+        </div>
+        <div class="row-actions"><button class="btn primary" type="button" id="mProposa">Fes el menú</button><span class="hint">Claude farà servir l'estoc d'aquesta pàgina i les teves llistes del Cookidoo.</span></div>
+        ${m.error ? `<div class="notice bad">${esc(m.error)}</div>` : ''}
+      </div>`;
+    }
+    if (m.fase === 'pensant') {
+      return capçal + `<div class="card"><h3>Preparant el menú…</h3><div class="chlist">${m.log.map((l) => `<div><span>${esc(l)}</span></div>`).join('') || '<div><span>Començant…</span></div>'}</div><div class="hint">No tanquis la pàgina.</div></div>`;
+    }
+    const p = m.proposta || { dies: [] };
+    const plat = (r) => `${esc(r.titol || r.id)}${r.congela || Number(r.racions) >= 6 ? ' <span class="tag res">❄️ 6</span>' : ''}${p.platNou && p.platNou.id === r.id ? ' <span class="tag check">nou</span>' : ''}`;
+    const apat = (llista, text) => text ? `<em>${esc(text)}</em>` : (llista && llista.length ? llista.map(plat).join('<br>') : '<span class="hint">—</span>');
+    const taula = `<div class="group">${(p.dies || []).map((d) => `<div class="item" style="grid-template-columns:5.2em minmax(0,1fr)"><strong class="num" style="white-space:nowrap">${esc(nomDia(d.dia))}</strong><div class="name"><div><span class="hint">Dinar:</span> ${apat(d.dinar)}</div><div><span class="hint">Sopar:</span> ${apat(d.sopar, d.soparText)}</div>${d.nota ? `<div class="notes">${esc(d.nota)}</div>` : ''}</div></div>`).join('')}</div>`;
+    const llistaHtml = (t, xs, f) => xs && xs.length ? `<div class="card"><h3>${t}</h3><ul>${xs.map((x) => `<li>${f(x)}</li>`).join('')}</ul></div>` : '';
+    const claus = m.claus || {};
+    const nomK = (k) => { const it = S.items.get(claus[k]); return it ? it.nom : k; };
+    let html = capçal + taula
+      + (p.platNou ? `<div class="card"><h3>Plat nou</h3><div><b>${esc(p.platNou.titol)}</b> (${esc(p.platNou.id)}) · ${esc(nomDia(p.platNou.dia || m.dilluns))} ${esc(p.platNou.apat || '')}</div><div class="hint">${esc(p.platNou.perque || '')}</div></div>` : '')
+      + llistaHtml('Treure del congelador', p.descongelar, (x) => `${esc(nomDia(x.dia))} a les 20:00: ${esc(x.que)} <span class="hint">(per a ${esc(x.plat)})</span>`)
+      + llistaHtml('Reserves 📌', p.reserves, (x) => `${esc(nomK(x.k))}: ${esc(x.quantitat)} per a ${esc(x.plat)} (${esc(nomDia(x.dia))})`)
+      + llistaHtml('Peix per a la Lupe', p.peix, (x) => `${esc(x.peix)} · ${esc(x.grams || '?')} g per a ${esc(x.plat)} (${esc(nomDia(x.dia))})`)
+      + llistaHtml('Avisos', p.avisos, (x) => esc(x));
+    if (m.fase === 'proposta') {
+      const ck = (id, t) => `<label class="toggle"><input type="checkbox" data-fer="${id}" ${m.fer[id] ? 'checked' : ''}> ${t}</label>`;
+      html += `<div class="card"><h3>Què faig?</h3>
+        ${ck('setmana', 'Posar-ho a «Mi semana» del Cookidoo')}
+        ${ck('llista', 'Refer la llista de la compra del Cookidoo (s\'esborra i s\'escriu de nou)')}
+        ${ck('carro', 'Omplir el carro del Mercadona (no paga res)')}
+        ${ck('notion', 'Apuntar reserves 📌 i sobres ⏳ a Notion')}
+        ${ck('calendari', 'Crear els avisos de descongelar i el de la Lupe')}
+        <div class="row-actions"><button class="btn primary" type="button" id="mAplica">Aplica-ho</button><button class="btn" type="button" id="mRefes">Torna a proposar</button></div>
+        <textarea id="mComentari2" placeholder="Si el tornes a proposar: què vols canviar?" style="width:100%;min-height:56px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--bg)"></textarea></div>`;
+    } else {
+      const icona = { pendent: '·', fent: '…', ok: '✓', error: '✗', saltat: '–' };
+      html += `<div class="card"><h3>${m.fase === 'fet' ? 'Fet' : 'Aplicant…'}</h3><div class="chlist">${m.passos.map((x) => `<div><span><b>${esc(x.nom)}</b>${x.detall ? `<br><span class="hint">${esc(x.detall)}</span>` : ''}</span><span class="st ${x.estat === 'ok' ? 'ok' : x.estat === 'error' ? 'err' : 'wait'}">${icona[x.estat]} ${esc(x.estat)}</span></div>`).join('')}</div>
+        ${m.fase === 'fet' ? `<div class="hint">Ara repassa el carro a tienda.mercadona.es, tria una franja de dilluns al matí i paga. Dilluns a les 20:15 et sonarà l'avís de la Lupe.</div><div class="row-actions"><button class="btn" type="button" id="mNou2">Fes un altre menú</button></div>` : ''}</div>`;
+    }
+    return html;
+  }
+
+  $('panel').addEventListener('click', (e) => {
+    const id = e.target.id;
+    if (id === 'mProposa') {
+      const m = S.menu;
+      m.dilluns = ($('mDilluns') && $('mDilluns').value) || m.dilluns;
+      m.persones = Math.max(1, Math.min(8, Number($('mPersones') && $('mPersones').value) || 4));
+      m.findeCasa = !!($('mFinde') && $('mFinde').checked);
+      m.platNou = !!($('mNou') && $('mNou').checked);
+      m.comentari = (($('mComentari') && $('mComentari').value) || '').trim();
+      proposaMenu();
+    } else if (id === 'mRefes') {
+      const extra = (($('mComentari2') && $('mComentari2').value) || '').trim();
+      if (extra) S.menu.comentari = [S.menu.comentari, `Canvis demanats sobre la proposta anterior: ${extra}`].filter(Boolean).join('\n');
+      proposaMenu();
+    } else if (id === 'mAplica') {
+      aplicaMenu();
+    } else if (id === 'mNou2') {
+      S.menu.fase = 'config'; S.menu.proposta = null; S.menu.passos = []; render();
+    }
+  });
+  $('panel').addEventListener('change', (e) => {
+    const f = e.target.closest('[data-fer]');
+    if (f) S.menu.fer[f.dataset.fer] = f.checked;
   });
 
   // ── Arrencada ──────────────────────────────────────────
