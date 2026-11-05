@@ -896,7 +896,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       'La verdura va al sopar. Als dinars: arròs, pasta, carn, guisats…',
       'Racions: plat que es congela bé (guisats, carn amb salsa, cremes, mandonguilles) → variant de 6 racions (les sobres van al congelador). Plat que no es congela (arròs, pasta, peix, ous, truita, patata a trossos) → 4 racions (o les persones). Tria la variant de racions bona (cada variant té un rID propi); mai «fes-ne la meitat».',
       'Ordre de gastar (molt important): ABANS de comprar res de nou, fes servir el que ja hi ha. Primer el que es fa malbé a la nevera (mira «notes»: «gastar aviat», «obert»…), després el congelador: el més antic primer («congelat» = data de congelació) i el que n\'hi ha més. Posa sobres congelades (plats cuinats) a 2 o 3 dinars de la setmana. Si un plat necessita carn o peix que ja és al congelador, tria aquest plat abans que un que obligui a comprar-ne. Els productes amb ⚠️ a «notes» no es fan servir mai.',
-      'NO ES REPETEIX CAP RECEPTA en dues setmanes com a mínim: no triïs cap recepta (ni cap variant del mateix plat) de la llista «RECEPTES JA FETES» que et passo. L\'única que es repeteix és el iogurt r55133 cada dilluns. Els menús de sopar «ja comprovats» no són excusa per repetir: tria\'n d\'altres de les llistes.',
+      'NO ES REPETEIX CAP RECEPTA en tres setmanes com a mínim: no triïs cap recepta (ni cap variant del mateix plat) de la llista «RECEPTES JA FETES» que et passo. Només es repeteixen el iogurt r55133 i els creps de dilluns (que no són cap recepta). Els menús de sopar «ja comprovats» no són excusa per repetir: si te\'n queden pocs, tria\'n d\'altres de les llistes de menús de sopar (la pàgina en comprova el llegum).',
       'Peix fresc: es compra a la Lupe el dilluns i arriba dimarts. Els plats de peix fresc, dimarts o dimecres. Peix barat (maira, seitó, sardina, bonítol, orada, verat, llobarro, calamarcets, musclo).',
       'No repeteixis plats dins la setmana. Fes servir les llistes de la família; mira els temps (entre setmana, plats de menys d\'una hora).',
       m.platNou ? 'Plat nou: proposa UN plat que no sigui a cap de les seves llistes (cerca\'l amb «cercar_receptes»), que compleixi les regles i encaixi en un àpat concret. Marca\'l a «platNou».' : 'Aquesta setmana no cal plat nou.',
@@ -945,7 +945,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       const det = S.menu.cache[x.r.id];
       if (!det) { out.push({ ...x, motiu: 'no he pogut llegir la recepta' }); continue; }
       const rc = S.menu.recents;
-      if (rc && x.r.id !== 'r55133' && (rc.ids.has(x.r.id) || rc.titols.has(normTitol(det.titol)))) { out.push({ ...x, motiu: 'ja s\'ha fet o és planificada fa menys de dues setmanes: no es pot repetir' }); continue; }
+      if (rc && x.r.id !== 'r55133' && (rc.ids.has(x.r.id) || rc.titols.has(normTitol(det.titol)))) { out.push({ ...x, motiu: 'ja s\'ha fet o és planificada fa menys de tres setmanes: no es pot repetir' }); continue; }
       if (det.llegum !== false) { out.push({ ...x, motiu: Array.isArray(det.llegum) ? 'porta llegum: ' + det.llegum.join(', ') : 'no sé si porta llegum' }); continue; }
       const rac = racionsDe(det);
       if (x.r.congela && rac && rac < 6 && (det.variants || []).length) out.push({ ...x, motiu: `és de ${rac} racions i s'hauria de fer de 6` });
@@ -958,10 +958,10 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   };
 
   const normTitol = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\b(xxl|rapid[ao]?|facil)\b/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-  // Receptes de «Mi semana» de les 2 setmanes anteriors i les 2 següents (la lectura torna 7 dies per crida)
+  // Receptes de «Mi semana» de les 3 setmanes anteriors i les 3 següents (la lectura torna 7 dies per crida)
   async function llegeixRecents(m) {
     const ids = new Set(); const titols = new Set(); const llista = [];
-    for (const delta of [-14, -7, 7, 14]) {
+    for (const delta of [-21, -14, -7, 7, 14, 21]) {
       const r = await n8n('cookidoo', 'setmana_llegir', { data: mesDies(m.dilluns, delta), dies: 7 });
       for (const d of r.resultat || []) for (const x of d.receptes || []) {
         if (x.id === 'r55133') continue; // el iogurt es repeteix cada dilluns
@@ -989,7 +989,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
         `Ets el cuiner de casa d'en Jimix (Thermomix + Cookidoo). Fes el menú de la setmana del ${nomDia(dies[0])} al ${nomDia(dies[6])} (dies: ${dies.join(', ')}). Escriu en català.`,
         'REGLES DE CASA:', regles,
         m.comentari ? `\nCOMENTARI D'EN JIMIX PER A AQUESTA SETMANA: ${m.comentari}` : '',
-        `\nRECEPTES JA FETES o planificades les 2 setmanes anteriors i següents (NO les repeteixis, ni cap variant): ${recents.text || '(cap)'}`,
+        `\nRECEPTES JA FETES o planificades les 3 setmanes anteriors i següents (NO les repeteixis, ni cap variant): ${recents.text || '(cap)'}`,
         '\nESTOC ACTUAL (k = clau per a les reserves):', JSON.stringify(out),
         `\nFRUITA: ${fruita}`,
         '\nLLISTES DEL COOKIDOO (rID | títol | temps). Tria NOMÉS receptes d\'aquestes llistes, amb el rID exacte:', textLlistes,
