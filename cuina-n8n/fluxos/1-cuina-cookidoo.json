@@ -36,6 +36,26 @@
     },
     {
       "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 1 1 *"
+            }
+          ]
+        }
+      },
+      "id": "106e706d-8a3b-4e08-ade3-8f8aa1106edc",
+      "name": "Publicació (no fa res)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ⚙️ CONFIGURACIÓ DEL COOKIDOO\n// Aquí no hi ha cap contrasenya: l'usuari i la contrasenya són a la credencial\n// «Cookidoo (usuari i contrasenya)» del node «Envia usuari i contrasenya».\nconst CONFIG = {\n  base: 'https://cookidoo.es',\n  idioma: 'es-ES',\n  mercat: 'es',\n  ciam: 'https://ciam.prod.cookidoo.vorwerk-digital.com',\n  clientId: 'mobile-android', // identificador públic de l'app de Cookidoo (no és cap secret)\n  redirectUri: 'com.vorwerk.cookidoo://code-grant',\n  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',\n};\n\nconst ent = $input.first().json;\nlet accio = String(ent.accio || '').trim();\nlet dades = llegeixDades(ent.dades);\n// Si l'executes a mà (botó «Execute workflow»), fa una prova només de lectura.\nif (!accio) { accio = 'prova'; dades = {}; }\nreturn [{ json: { ...CONFIG, accio, dades } }];\n"
       },
       "id": "82222a49-eefe-42bd-a5ff-8dcc33c03c67",

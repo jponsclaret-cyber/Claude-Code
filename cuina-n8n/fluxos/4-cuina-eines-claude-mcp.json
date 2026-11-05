@@ -3,8 +3,8 @@
   "nodes": [
     {
       "parameters": {
-        "authentication": "n8nOAuth2",
-        "path": "cuina-ccda21bc1c04",
+        "authentication": "bearerAuth",
+        "path": "cuina-62411e25a2af",
         "instructions": "Eines de la cuina d'en Jimix: Cookidoo, carro del Mercadona i calendaris d'iCloud. Normes: mai confirmis ni paguis cap comanda (l'eina del Mercadona només omple el carro); no enviïs missatges en nom seu; no buidis la llista del Cookidoo sense que formi part del procés setmanal. Totes les eines reben «accio» i «dades» (un text JSON)."
       },
       "id": "cb8db216-9949-45b7-a19c-7240078dc732",
@@ -15,7 +15,13 @@
         600,
         0
       ],
-      "webhookId": "79fc63a4-7774-4605-ad51-e2be9f502238"
+      "webhookId": "06dc380e-9796-4c0a-afd5-279bfff01907",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "",
+          "name": "MCP per a Claude (token)"
+        }
+      }
     },
     {
       "parameters": {
@@ -172,7 +178,7 @@
     },
     {
       "parameters": {
-        "content": "## Connector per a Claude\nExposa els 3 fluxos com a eines MCP.\n\n1. A cada eina (cookidoo, mercadona, calendari_icloud), tria el flux corresponent a «Workflow».\n2. Activa (Publish) aquest flux.\n3. Copia la **Production URL** del node «MCP Server Trigger».\n4. A claude.ai → Configuració → Connectors → Afegeix connector personalitzat → enganxa la URL. Et demanarà entrar amb el teu compte de n8n (OAuth).",
+        "content": "## Connector per a Claude\nExposa els 3 fluxos de cuina com a eines MCP. **Està protegit amb un token.**\n\n1. Obre la credencial «MCP per a Claude (token)» i posa-hi un token llarg i aleatori (p. ex. 40 lletres i números).\n2. Publica aquest flux.\n3. Copia la **Production URL** del node «MCP Server Trigger».\n4. A claude.ai → Configuració → Connectors → Afegeix connector personalitzat: enganxa la URL i, a les capçaleres, `Authorization` = `Bearer <el mateix token>`.",
         "width": 560,
         "height": 280
       },

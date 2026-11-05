@@ -36,6 +36,26 @@
     },
     {
       "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 1 1 *"
+            }
+          ]
+        }
+      },
+      "id": "539c123c-602f-44a9-a5a0-39421b3b0ca1",
+      "name": "Publicació (no fa res)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ⚙️ CONFIGURACIÓ DEL MERCADONA\n// El token NO va aquí: és a la credencial «Mercadona (token)» dels nodes HTTP.\n// L'identificador de client no és secret: surt a les adreces de la web (…/api/customers/<ID>/cart/).\nconst CONFIG = {\n  base: 'https://tienda.mercadona.es',\n  client: 'ENGANXA-AQUI-EL-TEU-ID-DE-CLIENT',\n  codiPostal: '08348',\n  idioma: 'es',\n  algoliaHost: '', // buit = automàtic\n  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',\n};\n\nconst ent = $input.first().json;\nlet accio = String(ent.accio || '').trim();\nlet dades = llegeixDades(ent.dades);\nif (!accio) { accio = 'prova'; dades = {}; } // execució manual: prova d'afegir i treure 1 producte\n\nif (accio !== 'cercar' && !/^[0-9a-f-]{20,}$/i.test(CONFIG.client)) {\n  throw new Error('Falta l\\'identificador de client del Mercadona al node «Entrada i config».');\n}\n\n// Magatzem (wh) del codi postal. És públic i el guardo 7 dies.\nconst sd = $getWorkflowStaticData('global');\nlet wh = sd.mercaWh && sd.mercaWh.cp === CONFIG.codiPostal && sd.mercaWh.caduca > Date.now() ? sd.mercaWh.wh : null;\nif (!wh) {\n  for (const method of ['PUT', 'POST']) {\n    const r = await H.httpRequest({\n      method, url: CONFIG.base + '/api/postal-codes/actions/change-pc/',\n      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': CONFIG.userAgent },\n      body: JSON.stringify({ new_postal_code: CONFIG.codiPostal }),\n      returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n    });\n    wh = r.headers && r.headers['x-customer-wh'];\n    if (wh) break;\n  }\n  if (!wh) throw new Error('No he pogut saber el magatzem del Mercadona per al codi postal ' + CONFIG.codiPostal + '.');\n  sd.mercaWh = { cp: CONFIG.codiPostal, wh, caduca: Date.now() + 7 * 86400000 };\n}\n\nconst urlCarro = `${CONFIG.base}/api/customers/${CONFIG.client}/cart/?lang=${CONFIG.idioma}&wh=${wh}`;\nreturn [{ json: { ...CONFIG, wh, accio, dades, urlCarro } }];\n"
       },
       "id": "898abb61-40d6-4e79-a0bc-02325f4d54f5",
