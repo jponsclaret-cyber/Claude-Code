@@ -175,6 +175,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       <span class="grow"></span>
       <span class="pill warn" id="estat"><span class="dot"></span><span id="estatText">Connectant amb Notion…</span></span>
       <button class="iconbtn" id="recarrega" type="button">Torna a llegir</button>
+      <button class="iconbtn" id="permisos" type="button" hidden>Permisos</button>
     </div>
     <nav class="tabs" role="tablist" id="tabs"></nav>
   </div>
@@ -278,23 +279,51 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const c = e && e.code;
     if (c === 'server_not_connected' || c === 'server_not_found') return 'Notion no està connectat al teu compte. Afegeix-lo a claude.ai → Configuració → Connectors i torna a obrir la pàgina.';
     if (c === 'needs_reauth') return 'Cal tornar a connectar Notion a claude.ai → Configuració → Connectors.';
-    if (c === 'not_in_manifest' || c === 'approval_required' || c === 'not_granted') return 'Aquesta pàgina encara no té permís per fer servir Notion. Torna-ho a provar i accepta-ho quan t\'ho demani.';
+    if (c === 'not_in_manifest' || c === 'approval_required' || c === 'not_granted') return `Aquesta pàgina no té permís per fer servir Notion [${c}]. Toca «Permisos» a dalt, activa Notion i «Cuina n8n», i després «Torna a llegir».`;
     if (c === 'blocked_by_policy') return 'La teva organització no deixa fer servir Notion des d\'aquí.';
-    if (c === 'server_unavailable' || c === 'upstream_error') return `Notion no respon ara mateix (${accio}). Torna-ho a provar d'aquí a un moment.`;
+    if (c === 'server_unavailable' || c === 'upstream_error') return `Notion no ha respost (${accio}) [${c}]. Toca «Torna a llegir»; si t'ha demanat permís, accepta'l.`;
+    if (c === 'tool_error' && /usage_limit|allowance|límit|limit/i.test(String(e.message || ''))) return `Notion ha arribat al límit de consultes del pla gratuït (${accio}). Es reinicia en menys d'una hora.`;
     if (c === 'tool_error') return `Notion ha rebutjat l'operació (${accio}): ${String(e.message || '').slice(0, 200)}`;
-    return `No s'ha pogut ${accio}: ${String((e && e.message) || e).slice(0, 200)}`;
+    return `No s'ha pogut ${accio}: ${String((e && e.message) || e).slice(0, 200)}${c ? ` [${c}]` : ''}`;
   };
 
   async function consulta(dsUrl, filter, sort) {
-    const r = await mcp.callTool(NOTION, 'notion-query-data-sources', {
-      data: { mode: 'rows', data_source_url: dsUrl, limit: 100, ...(filter ? { filter } : {}), ...(sort ? { sort } : {}) },
-    }, { cache: false });
+    const input = { data: { mode: 'rows', data_source_url: dsUrl, limit: 100, ...(filter ? { filter } : {}), ...(sort ? { sort } : {}) } };
+    let r;
+    try { r = await mcp.callTool(NOTION, 'notion-query-data-sources', input, { cache: false }); }
+    catch (e) {
+      if (!(e && e.retryable)) throw e;
+      await new Promise((ok) => setTimeout(ok, Math.min(Number(e.retryAfterMs) || 1500, 8000) + Math.random() * 500));
+      r = await mcp.callTool(NOTION, 'notion-query-data-sources', input, { cache: false });
+    }
     const p = payloadDe(r);
     const res = (p && (p.results || p.rows)) || [];
     return { rows: Array.isArray(res) ? res : [], mesFiles: !!(p && p.has_more) };
   }
   const filtreLloc = (op, v) => ({ type: 'group', operator: 'and', filters: [{ type: 'property', property: 'Lloc', propertyType: 'select', operator: op, value: { type: 'exact', value: v } }] });
 
+  const VISTES = {
+    rebost: 'https://www.notion.so/a5e43a2bd9c34c85859a71486ae70f91?v=5c741954816a42deb053d861ade8331a', // Rebost · Default view (tot)
+    congelador: 'https://www.notion.so/a834632b74c74175ade7d48d6c9d6659?v=40b7a224ec23810c9d1d000c5137aedc', // Congelador · «Què hi ha» (racions > 0)
+  };
+  async function cridaNotion(input) {
+    try { return await mcp.callTool(NOTION, 'notion-query-data-sources', input, { cache: false }); }
+    catch (e) {
+      if (!(e && e.retryable)) throw e;
+      await new Promise((ok) => setTimeout(ok, Math.min(Number(e.retryAfterMs) || 1500, 8000) + Math.random() * 500));
+      return mcp.callTool(NOTION, 'notion-query-data-sources', input, { cache: false });
+    }
+  }
+  async function vista(viewUrl) {
+    const rows = []; let cursor = null; let mesFiles = false;
+    for (let i = 0; i < 10; i++) {
+      const p = payloadDe(await cridaNotion({ data: { mode: 'view', view_url: viewUrl, page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) } }));
+      rows.push(...((p && p.results) || []));
+      if (!p || !p.has_more || !p.next_cursor) break;
+      cursor = p.next_cursor; mesFiles = i === 9;
+    }
+    return { rows, mesFiles };
+  }
   async function carrega() {
     S.carregant = true; S.errors = {}; render();
     setEstat('warn', 'Llegint Notion…');
@@ -308,12 +337,15 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const prev = S.items;
     const nous = new Map();
     const avisos = [];
-    const feines = [
-      ['nevera', consulta(DS.rebost, filtreLloc('enum_is', 'Nevera'))],
-      ['rebost', consulta(DS.rebost, filtreLloc('enum_is_not', 'Nevera'))],
-      ['congelador', consulta(DS.congelador, { type: 'group', operator: 'and', filters: [{ type: 'property', property: 'Racions', propertyType: 'number', operator: 'number_greater_than', value: { type: 'exact', value: 0 } }] })],
-    ];
-    const res = await Promise.allSettled(feines.map((f) => f[1]));
+    // Lectura per vistes de Notion (no gasten el límit de consultes del pla gratuït).
+    // La primera va sola: és la que pot demanar el permís de Notion.
+    const rebost = await Promise.allSettled([vista(VISTES.rebost)]);
+    const congelador = await Promise.allSettled([vista(VISTES.congelador)]);
+    const feines = [['nevera'], ['rebost'], ['congelador']];
+    const parteix = (lloc) => rebost[0].status === 'rejected' ? rebost[0]
+      : { status: 'fulfilled', value: { rows: rebost[0].value.rows.filter((r) => (lloc === 'Nevera') === (r['Lloc'] === 'Nevera')), mesFiles: rebost[0].value.mesFiles } };
+    const res = [parteix('Nevera'), parteix('Rebost'), congelador[0].status === 'rejected' ? congelador[0]
+      : { status: 'fulfilled', value: { rows: congelador[0].value.rows.filter((r) => Number(r['Racions']) > 0), mesFiles: congelador[0].value.mesFiles } }];
     let ok = 0;
     res.forEach((r, i) => {
       const zona = feines[i][0];
@@ -1083,6 +1115,19 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       }
     } catch (e) { /* sense historial */ }
   });
-  usa('mcp').then((m) => { mcp = m; carrega(); });
+  usa('permissions').then((p) => {
+    perms = p;
+    if (!p) return;
+    $('permisos').hidden = false;
+    $('permisos').addEventListener('click', async () => { try { await p.manage(); } catch (e) { mostraAvis('Obre el menú de l\'artefacte → Permisos i activa Notion i «Cuina n8n».', false); } carrega(); });
+  });
+  usa('mcp').then(async (m) => {
+    mcp = m;
+    if (m) {
+      const p = await usa('permissions');
+      if (p) { try { await p.request(['mcp:Notion', 'mcp:Cuina n8n']); } catch (e) { /* es demanarà a la primera crida */ } }
+    }
+    carrega();
+  });
 })();
 </script>
