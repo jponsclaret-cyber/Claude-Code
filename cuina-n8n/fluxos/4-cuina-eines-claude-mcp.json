@@ -4,7 +4,7 @@
     {
       "parameters": {
         "authentication": "bearerAuth",
-        "path": "cuina-62411e25a2af",
+        "path": "cuina-1394a941049a",
         "instructions": "Eines de la cuina d'en Jimix: Cookidoo, carro del Mercadona i calendaris d'iCloud. Normes: mai confirmis ni paguis cap comanda (l'eina del Mercadona només omple el carro); no enviïs missatges en nom seu; no buidis la llista del Cookidoo sense que formi part del procés setmanal. Totes les eines reben «accio» i «dades» (un text JSON)."
       },
       "id": "cb8db216-9949-45b7-a19c-7240078dc732",
@@ -15,7 +15,7 @@
         600,
         0
       ],
-      "webhookId": "06dc380e-9796-4c0a-afd5-279bfff01907",
+      "webhookId": "cdaf3bca-fce2-4a88-a713-91e08c0fe4e9",
       "credentials": {
         "httpBearerAuth": {
           "id": "",
@@ -127,12 +127,12 @@
     },
     {
       "parameters": {
-        "description": "Calendaris d'iCloud d'en Jimix («Personal» per als avisos, «Família» per a l'arribada de la compra). Paràmetres: «accio» i «dades» (text JSON). Les hores són de Madrid.\nAccions:\n- llistar: {\"calendari\":\"Personal\",\"des_de\":\"2026-11-09\",\"fins_a\":\"2026-11-16\"} → esdeveniments amb títol, inici, fi i nombre d'alarmes.\n- crear: {\"calendari\":\"Personal\",\"esdeveniments\":[{\"titol\":\"❄️ Treure del congelador: …\",\"inici\":\"2026-11-09T20:00\",\"durada_min\":10,\"descripcio\":\"…\",\"alarma\":true}]} → crea els que no existeixen (mateix títol i hora = repetit, no el crea). L'alarma sona a l'hora exacta.\nResposta: {\"ok\":true,\"creats\":[…],\"repetits\":[…],\"errors\":[…]}.",
+        "description": "Google Calendar d'en Jimix (calendari principal; els avisos hi sonen a l'iPhone). Paràmetres: «accio» i «dades» (text JSON). Les hores són de Madrid.\nAccions:\n- llistar: {\"des_de\":\"2026-11-09\",\"fins_a\":\"2026-11-16\"} → esdeveniments amb títol, inici, fi i alarmes. Opcional \"calendari\":\"<nom d'un altre calendari de Google>\".\n- crear: {\"esdeveniments\":[{\"titol\":\"❄️ Treure del congelador: …\",\"inici\":\"2026-11-09T20:00\",\"durada_min\":10,\"descripcio\":\"…\",\"alarma\":true}]} → crea els que no existeixen (mateix títol i hora = repetit, no el crea). L'alarma sona a l'hora exacta.\nResposta: {\"ok\":true,\"creats\":[…],\"repetits\":[…],\"errors\":[…]}.",
         "workflowId": {
           "__rl": true,
           "mode": "list",
           "value": "",
-          "cachedResultName": "Cuina · Calendari iCloud"
+          "cachedResultName": "Cuina · Calendari Google"
         },
         "workflowInputs": {
           "mappingMode": "defineBelow",
@@ -167,8 +167,8 @@
           "convertFieldsToString": false
         }
       },
-      "id": "74d6e975-5181-45fe-a101-0285bedff585",
-      "name": "calendari_icloud",
+      "id": "1554b3a1-980f-4866-a482-729942ba5218",
+      "name": "calendari",
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
       "position": [
@@ -216,7 +216,7 @@
         ]
       ]
     },
-    "calendari_icloud": {
+    "calendari": {
       "ai_tool": [
         [
           {

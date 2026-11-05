@@ -1,0 +1,322 @@
+{
+  "name": "Cuina · Calendari Google",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "accio"
+            },
+            {
+              "name": "dades"
+            }
+          ]
+        }
+      },
+      "id": "703de785-2ea8-42c0-a7f6-5af2e3bcc9d8",
+      "name": "Quan el crida Claude",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d3887e14-6cd4-4589-a2bd-b013dc7c8f57",
+      "name": "Prova manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 1 1 *"
+            }
+          ]
+        }
+      },
+      "id": "445d6d45-e83d-4ebc-a7d7-ac9af7845666",
+      "name": "Publicació (no fa res)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Hores de Madrid ──\nconst ZONA = 'Europe/Madrid';\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nconst respostaGoogle = (r, que) => {\n  const st = r && r.statusCode;\n  const b = comAJson(cosResposta(r));\n  if (st === 401 || st === 403) throw new Error(`Google Calendar ha rebutjat l'accés (${que}). Torna a connectar la credencial «Google Calendar (cuina)» a n8n («Sign in with Google»).`);\n  if (!st || st >= 400) throw new Error(`Google Calendar (${que}): HTTP ${st}: ${JSON.stringify(b).slice(0, 300)}`);\n  return b || {};\n};\n// ── Fi hores ──\n\n// ⚙️ CONFIGURACIÓ DEL CALENDARI DE GOOGLE\n// L'accés és a la credencial «Google Calendar (cuina)» (botó «Sign in with Google» a n8n).\nconst CONFIG = {\n  calendariPerDefecte: 'primary', // el calendari principal del compte de Google\n};\nconst ent = $input.first().json;\nlet accio = String(ent.accio || '').trim();\nlet dades = llegeixDades(ent.dades);\nif (!accio) { accio = 'prova'; dades = {}; } // execució manual: llegeix els esdeveniments dels 7 dies vinents\nreturn [{ json: { ...CONFIG, accio, dades } }];\n"
+      },
+      "id": "e6d404c5-c0a2-4ad2-a355-d615e5fc46e9",
+      "name": "Entrada i config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "ef26fd4f-6240-4426-ae5f-2d267a7c80f7",
+      "name": "Llista calendaris",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        100
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": "Google Calendar (cuina)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Hores de Madrid ──\nconst ZONA = 'Europe/Madrid';\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nconst respostaGoogle = (r, que) => {\n  const st = r && r.statusCode;\n  const b = comAJson(cosResposta(r));\n  if (st === 401 || st === 403) throw new Error(`Google Calendar ha rebutjat l'accés (${que}). Torna a connectar la credencial «Google Calendar (cuina)» a n8n («Sign in with Google»).`);\n  if (!st || st >= 400) throw new Error(`Google Calendar (${que}): HTTP ${st}: ${JSON.stringify(b).slice(0, 300)}`);\n  return b || {};\n};\n// ── Fi hores ──\n\nconst c = $('Entrada i config').first().json;\nconst d = c.dades || {};\nconst llista = respostaGoogle($input.first().json, 'llistar calendaris');\nconst cals = (llista.items || []).map((x) => ({ id: x.id, nom: x.summaryOverride || x.summary, principal: !!x.primary, rol: x.accessRole }));\nconst demanat = d.calendari ? String(d.calendari) : '';\nlet cal = null;\nif (!demanat || ['personal', 'principal', 'primary'].includes(normalitza(demanat))) cal = cals.find((x) => x.principal) || { id: 'primary', nom: 'principal' };\nelse cal = cals.find((x) => normalitza(x.nom) === normalitza(demanat) || x.id === demanat);\nif (!cal) throw new Error(`No trobo el calendari «${demanat}». N'hi ha: ${cals.map((x) => x.nom).join(', ')}.`);\n\nlet desDe; let finsA; let esdeveniments = [];\nif (c.accio === 'crear') {\n  esdeveniments = (d.esdeveniments || []).map((e, i) => {\n    if (!e.titol || !e.inici) throw new Error(`L'esdeveniment ${i + 1} no té «titol» o «inici».`);\n    const ini = localAUtc(e.inici);\n    const durada = Number(e.durada_min ?? e.duradaMin ?? 10);\n    return { titol: String(e.titol), descripcio: e.descripcio ? String(e.descripcio) : '', iniciTs: ini, fiTs: ini + durada * 60000, alarma: e.alarma !== false, inici: horaMadrid(ini), fi: horaMadrid(ini + durada * 60000) };\n  });\n  if (!esdeveniments.length) throw new Error('Falta «esdeveniments».');\n  if (esdeveniments.length > 30) throw new Error('Massa esdeveniments d\\'una vegada (màxim 30).');\n  desDe = Math.min(...esdeveniments.map((e) => e.iniciTs)) - 86400000;\n  finsA = Math.max(...esdeveniments.map((e) => e.fiTs)) + 86400000;\n} else if (c.accio === 'llistar' || c.accio === 'prova') {\n  desDe = localAUtc(d.des_de || avuiMadrid());\n  finsA = d.fins_a ? localAUtc(d.fins_a) : desDe + 7 * 86400000;\n} else {\n  throw new Error(`Acció desconeguda: «${c.accio}». Vàlides: llistar, crear.`);\n}\nconst base = 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(cal.id);\nconst urlLlista = `${base}/events?` + qs({ timeMin: new Date(desDe).toISOString(), timeMax: new Date(finsA).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: 250, timeZone: ZONA });\nreturn [{ json: { calendari: cal.nom, calId: cal.id, base, urlLlista, esdeveniments } }];\n"
+      },
+      "id": "5adf4820-edee-43b5-ac9c-cd05b8d51032",
+      "name": "Tria calendari i prepara",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.urlLlista }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "77ad17c4-e362-4e8b-a214-f17a27de9cc9",
+      "name": "Llegeix esdeveniments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        100
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": "Google Calendar (cuina)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Hores de Madrid ──\nconst ZONA = 'Europe/Madrid';\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nconst respostaGoogle = (r, que) => {\n  const st = r && r.statusCode;\n  const b = comAJson(cosResposta(r));\n  if (st === 401 || st === 403) throw new Error(`Google Calendar ha rebutjat l'accés (${que}). Torna a connectar la credencial «Google Calendar (cuina)» a n8n («Sign in with Google»).`);\n  if (!st || st >= 400) throw new Error(`Google Calendar (${que}): HTTP ${st}: ${JSON.stringify(b).slice(0, 300)}`);\n  return b || {};\n};\n// ── Fi hores ──\n\nconst c = $('Entrada i config').first().json;\nconst prep = $('Tria calendari i prepara').first().json;\nconst r = respostaGoogle($input.first().json, 'llegir esdeveniments');\nconst existents = (r.items || []).filter((x) => x.status !== 'cancelled').map((x) => {\n  const ini = x.start && (x.start.dateTime || x.start.date);\n  const fi = x.end && (x.end.dateTime || x.end.date);\n  const iniTs = ini ? Date.parse(ini.length === 10 ? ini + 'T00:00:00Z' : ini) : null;\n  const fiTs = fi ? Date.parse(fi.length === 10 ? fi + 'T00:00:00Z' : fi) : null;\n  const rem = x.reminders || {};\n  return {\n    titol: x.summary || '(sense títol)', descripcio: x.description || '',\n    iniciTs: iniTs, inici: iniTs != null ? (ini.length === 10 ? ini : horaMadrid(iniTs)) : '', fi: fiTs != null ? (fi.length === 10 ? fi : horaMadrid(fiTs)) : '',\n    alarmes: rem.useDefault ? 'per defecte' : (rem.overrides || []).length,\n  };\n});\n// Quan no cal crear res, fem una consulta de disponibilitat (només lectura) perquè el flux continuï fins al final.\nconst skip = { skip: true, metode: 'POST', url: 'https://www.googleapis.com/calendar/v3/freeBusy',\n  cos: JSON.stringify({ timeMin: new Date().toISOString(), timeMax: new Date(Date.now() + 3600000).toISOString(), items: [{ id: prep.calId }] }) };\nif (c.accio !== 'crear') return [{ json: { ...skip, existents } }];\nconst items = [];\nconst repetits = [];\nfor (const e of prep.esdeveniments) {\n  const dup = existents.find((x) => normalitza(x.titol) === normalitza(e.titol) && x.iniciTs === e.iniciTs);\n  if (dup) { repetits.push({ titol: e.titol, inici: e.inici }); continue; }\n  const cos = {\n    summary: e.titol,\n    ...(e.descripcio ? { description: e.descripcio } : {}),\n    start: { dateTime: e.inici + ':00', timeZone: ZONA },\n    end: { dateTime: e.fi + ':00', timeZone: ZONA },\n    reminders: { useDefault: false, overrides: e.alarma ? [{ method: 'popup', minutes: 0 }] : [] },\n  };\n  items.push({ json: { skip: false, metode: 'POST', url: prep.base + '/events', cos: JSON.stringify(cos), titol: e.titol, inici: e.inici, alarma: e.alarma, repetits } });\n}\nif (!items.length) return [{ json: { ...skip, repetits } }];\nreturn items;\n"
+      },
+      "id": "a1258064-d7b2-4bf8-aa33-640b746a1d5e",
+      "name": "Decideix què cal crear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.cos }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "b87bc0af-c9ab-4941-a91c-d4115ff41aaf",
+      "name": "Crea esdeveniments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        100
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "",
+          "name": "Google Calendar (cuina)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Hores de Madrid ──\nconst ZONA = 'Europe/Madrid';\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nconst respostaGoogle = (r, que) => {\n  const st = r && r.statusCode;\n  const b = comAJson(cosResposta(r));\n  if (st === 401 || st === 403) throw new Error(`Google Calendar ha rebutjat l'accés (${que}). Torna a connectar la credencial «Google Calendar (cuina)» a n8n («Sign in with Google»).`);\n  if (!st || st >= 400) throw new Error(`Google Calendar (${que}): HTTP ${st}: ${JSON.stringify(b).slice(0, 300)}`);\n  return b || {};\n};\n// ── Fi hores ──\n\nconst c = $('Entrada i config').first().json;\nconst prep = $('Tria calendari i prepara').first().json;\nconst dec = $('Decideix què cal crear').all().map((x) => x.json);\nconst resp = $input.all().map((x) => x.json);\nif (c.accio !== 'crear') {\n  const existents = (dec[0].existents || []).map((e) => ({ titol: e.titol, inici: e.inici, fi: e.fi, alarmes: e.alarmes, ...(e.descripcio ? { descripcio: e.descripcio } : {}) }));\n  return [{ json: { ok: true, accio: c.accio, calendari: prep.calendari, esdeveniments: existents } }];\n}\nconst creats = [];\nconst errors = [];\ndec.forEach((d, i) => {\n  if (d.skip) return;\n  const st = resp[i] && resp[i].statusCode;\n  if (st >= 200 && st < 300) creats.push({ titol: d.titol, inici: d.inici, alarma: d.alarma });\n  else errors.push({ titol: d.titol, inici: d.inici, error: `HTTP ${st}: ${comATexte(cosResposta(resp[i])).slice(0, 200)}` });\n});\nconst repetits = (dec[0] && dec[0].repetits) || [];\nreturn [{ json: { ok: errors.length === 0, accio: 'crear', calendari: prep.calendari, creats, repetits, errors } }];\n"
+      },
+      "id": "f532dfec-eff6-45bb-ae7e-d0c5bd51f642",
+      "name": "Resultat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Calendari de Google\nLlegeix i crea avisos al Google Calendar (per defecte, el calendari principal), amb una notificació a l'hora exacta. No en crea de repetits.\n\n**Credencial:** «Google Calendar (cuina)»: obre-la i clica **Sign in with Google**.\n\nPerquè les notificacions sonin a l'iPhone: Configuració → Calendari → Comptes → afegeix el compte de Google (o fes servir l'app Google Calendar).\n\n**Prova:** executa des del node «Prova manual». Només llegeix els 7 dies vinents.",
+        "width": 560,
+        "height": 320
+      },
+      "id": "a875a084-4671-41f6-a807-0506c29bc07b",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -380
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Quan el crida Claude": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova manual": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada i config": {
+      "main": [
+        [
+          {
+            "node": "Llista calendaris",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llista calendaris": {
+      "main": [
+        [
+          {
+            "node": "Tria calendari i prepara",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tria calendari i prepara": {
+      "main": [
+        [
+          {
+            "node": "Llegeix esdeveniments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llegeix esdeveniments": {
+      "main": [
+        [
+          {
+            "node": "Decideix què cal crear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decideix què cal crear": {
+      "main": [
+        [
+          {
+            "node": "Crea esdeveniments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crea esdeveniments": {
+      "main": [
+        [
+          {
+            "node": "Resultat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Europe/Madrid"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

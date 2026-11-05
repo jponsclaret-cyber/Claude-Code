@@ -100,7 +100,7 @@
         "method": "GET",
         "url": "={{ $('Entrada i config').first().json.base }}/api/customers/{{ $('Entrada i config').first().json.client }}/recommendations/myregulars/precision/?lang={{ $('Entrada i config').first().json.idioma }}&wh={{ $('Entrada i config').first().json.wh }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -141,9 +141,9 @@
         -140
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -165,7 +165,7 @@
         "method": "GET",
         "url": "={{ $('Entrada i config').first().json.urlCarro }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -206,9 +206,9 @@
         20
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -230,7 +230,7 @@
         "method": "GET",
         "url": "={{ $('Entrada i config').first().json.urlCarro }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -271,9 +271,9 @@
         180
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -295,7 +295,7 @@
         "method": "PUT",
         "url": "={{ $('Entrada i config').first().json.urlCarro }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -339,9 +339,9 @@
         180
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -376,7 +376,7 @@
         "method": "GET",
         "url": "={{ $('Entrada i config').first().json.urlCarro }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -417,9 +417,9 @@
         360
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -441,7 +441,7 @@
         "method": "PUT",
         "url": "={{ $('Entrada i config').first().json.urlCarro }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -485,9 +485,9 @@
         360
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -496,7 +496,7 @@
         "method": "GET",
         "url": "={{ $('Entrada i config').first().json.urlCarro }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -537,9 +537,9 @@
         360
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -561,7 +561,7 @@
         "method": "PUT",
         "url": "={{ $('Entrada i config').first().json.urlCarro }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -605,9 +605,9 @@
         360
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -616,7 +616,7 @@
         "method": "GET",
         "url": "={{ $('Entrada i config').first().json.urlCarro }}",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBearerAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -657,9 +657,9 @@
         360
       ],
       "credentials": {
-        "httpHeaderAuth": {
+        "httpBearerAuth": {
           "id": "",
-          "name": "Mercadona (token)"
+          "name": "Mercadona token (només eyJ…)"
         }
       }
     },
@@ -691,7 +691,7 @@
     },
     {
       "parameters": {
-        "content": "## Mercadona (només el carro)\nCerca productes, llegeix el carro i hi posa o en treu productes. **No pot fer ni pagar cap comanda.**\n\n**Credencial:** «Mercadona (token)», tipus *Header Auth*:\nName `Authorization` · Value `Bearer <token de la web>` (dura unes 6 setmanes).\n\n**Configura:** el teu ID de client al node «Entrada i config».\n\n**Prova:** botó «Execute workflow». Afegeix 1 producte (sal) al carro i el torna a treure.",
+        "content": "## Mercadona (només el carro)\nCerca productes, llegeix el carro i hi posa o en treu productes. **No pot fer ni pagar cap comanda.**\n\n**Credencial:** «Mercadona token (només eyJ…)», tipus *Bearer Auth*: enganxa NOMÉS el token, que comença per `eyJ` (n8n ja hi posa «Bearer»). Dura unes 6 setmanes.\nPer copiar-lo sencer: a la consola del Chrome a tienda.mercadona.es, `copy(JSON.parse(localStorage.getItem('MO-user')).token)`.\n\n**Configura:** el teu ID de client al node «Entrada i config».\n\n**Prova:** botó «Execute workflow». Afegeix 1 producte (sal) al carro i el torna a treure.",
         "width": 560,
         "height": 320
       },
