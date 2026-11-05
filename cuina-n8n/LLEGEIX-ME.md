@@ -53,6 +53,12 @@ A claude.ai, ves a **Configuració → Connectors → Afegeix un connector perso
 
 La primera versió, amb OAuth, quedava oberta a la teva versió de n8n i es va tancar de seguida.
 
+## Artefacte: «Fes-ho tot en segon pla»
+El botó obre una sessió de Claude Code al núvol (`create_session`, entorn «Claude-Code») amb tot l'encàrrec i les dades del formulari. Fa la feina encara que tanquis l'app i, quan acaba, envia una notificació (`PushNotification`).
+- Les sessions creades així tenen els connectors «Cuina n8n» i Notion (provat el 5-11-2026).
+- Gasta l'ús del teu pla de Claude, igual que un xat llarg.
+- La rutina «Cuina: menú i compra (en segon pla)» ja no es fa servir: la pots esborrar.
+
 ## Riscos coneguts
 - **Totes dues són API internes no oficials:** el Cookidoo i el Mercadona les poden canviar sense avís.
 - **El token del Mercadona caduca** cada 6 setmanes aproximadament. El flux t'avisa amb un missatge clar.
