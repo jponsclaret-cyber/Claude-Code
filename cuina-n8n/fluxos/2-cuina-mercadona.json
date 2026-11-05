@@ -1,0 +1,923 @@
+{
+  "name": "Cuina · Mercadona",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "accio"
+            },
+            {
+              "name": "dades"
+            }
+          ]
+        }
+      },
+      "id": "d6ec03a5-2783-4e34-a2e6-16dfbfdfefb5",
+      "name": "Quan el crida Claude",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f5b5b4ce-e339-48bd-a45b-91ec3e2ab53a",
+      "name": "Prova manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ⚙️ CONFIGURACIÓ DEL MERCADONA\n// El token NO va aquí: és a la credencial «Mercadona (token)» dels nodes HTTP.\n// L'identificador de client no és secret: surt a les adreces de la web (…/api/customers/<ID>/cart/).\nconst CONFIG = {\n  base: 'https://tienda.mercadona.es',\n  client: 'ENGANXA-AQUI-EL-TEU-ID-DE-CLIENT',\n  codiPostal: '08348',\n  idioma: 'es',\n  algoliaHost: '', // buit = automàtic\n  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',\n};\n\nconst ent = $input.first().json;\nlet accio = String(ent.accio || '').trim();\nlet dades = llegeixDades(ent.dades);\nif (!accio) { accio = 'prova'; dades = {}; } // execució manual: prova d'afegir i treure 1 producte\n\nif (accio !== 'cercar' && !/^[0-9a-f-]{20,}$/i.test(CONFIG.client)) {\n  throw new Error('Falta l\\'identificador de client del Mercadona al node «Entrada i config».');\n}\n\n// Magatzem (wh) del codi postal. És públic i el guardo 7 dies.\nconst sd = $getWorkflowStaticData('global');\nlet wh = sd.mercaWh && sd.mercaWh.cp === CONFIG.codiPostal && sd.mercaWh.caduca > Date.now() ? sd.mercaWh.wh : null;\nif (!wh) {\n  for (const method of ['PUT', 'POST']) {\n    const r = await H.httpRequest({\n      method, url: CONFIG.base + '/api/postal-codes/actions/change-pc/',\n      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': CONFIG.userAgent },\n      body: JSON.stringify({ new_postal_code: CONFIG.codiPostal }),\n      returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n    });\n    wh = r.headers && r.headers['x-customer-wh'];\n    if (wh) break;\n  }\n  if (!wh) throw new Error('No he pogut saber el magatzem del Mercadona per al codi postal ' + CONFIG.codiPostal + '.');\n  sd.mercaWh = { cp: CONFIG.codiPostal, wh, caduca: Date.now() + 7 * 86400000 };\n}\n\nconst urlCarro = `${CONFIG.base}/api/customers/${CONFIG.client}/cart/?lang=${CONFIG.idioma}&wh=${wh}`;\nreturn [{ json: { ...CONFIG, wh, accio, dades, urlCarro } }];\n"
+      },
+      "id": "898abb61-40d6-4e79-a0bc-02325f4d54f5",
+      "name": "Entrada i config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 6,
+        "output": "={{ ({\"cercar\":0,\"habituals\":1,\"carro\":2,\"posar\":3,\"treure\":3,\"prova\":4})[$json.accio] ?? 5 }}"
+      },
+      "id": "bf5d34a5-cc3a-49db-ae69-6aba6ce42d89",
+      "name": "Quina acció?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Cerca de productes del Mercadona (pública, la mateixa que fa la web) ──\n// No hi ha cap clau escrita: la configuració pública de cerca es llegeix de la web cada setmana.\nasync function configCerca(c) {\n  const sd = $getWorkflowStaticData('global');\n  if (sd.mercaCerca && sd.mercaCerca.caduca > Date.now()) return sd.mercaCerca;\n  const get = async (url) => comATexte((await H.httpRequest({\n    method: 'GET', url, headers: { 'User-Agent': c.userAgent, Accept: '*/*' },\n    returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n  })).body);\n  const home = await get(c.base + '/');\n  const scripts = [...home.matchAll(/<script[^>]+src=[\"']([^\"']+\\.js)[\"']/gi)].map((m) => absoluta(m[1], c.base + '/'));\n  let trobat = null;\n  for (const s of scripts.slice(0, 8)) {\n    const js = await get(s);\n    const m = js.match(/\"([A-Z0-9]{10})\",[A-Za-z0-9_$]+=\"([0-9a-f]{32})\"/);\n    if (m) { trobat = { app: m[1], clau: m[2] }; break; }\n  }\n  if (!trobat) throw new Error('No trobo la configuració de cerca a la web del Mercadona (pot haver canviat).');\n  sd.mercaCerca = { ...trobat, caduca: Date.now() + 7 * 86400000 };\n  return sd.mercaCerca;\n}\nconst compactaProducte = (p) => {\n  const pi = p.price_instructions || {};\n  return {\n    id: String(p.id),\n    nom: p.display_name,\n    format: [p.packaging, pi.unit_size && pi.size_format ? `${pi.unit_size} ${pi.size_format}` : ''].filter(Boolean).join(' · '),\n    preu: pi.unit_price != null ? Number(pi.unit_price) : null,\n    preuRef: pi.reference_price ? `${pi.reference_price} €/${pi.reference_format || ''}` : null,\n  };\n};\nasync function cercaProductes(c, consultes, perConsulta) {\n  const cfg = await configCerca(c);\n  const host = c.algoliaHost || `https://${cfg.app.toLowerCase()}-dsn.algolia.net`;\n  const index = `products_prod_${c.wh}_${c.idioma}`;\n  const r = await H.httpRequest({\n    method: 'POST', url: `${host}/1/indexes/*/queries`,\n    headers: { 'X-Algolia-API-Key': cfg.clau, 'X-Algolia-Application-Id': cfg.app, 'Content-Type': 'application/json', Accept: 'application/json' },\n    body: JSON.stringify({ requests: consultes.map((q) => ({ indexName: index, params: qs({ query: q, hitsPerPage: perConsulta }) })) }),\n    returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n  });\n  if (r.statusCode >= 400) {\n    $getWorkflowStaticData('global').mercaCerca = null;\n    throw new Error(`La cerca del Mercadona ha fallat (HTTP ${r.statusCode}). Torna-ho a provar.`);\n  }\n  const j = comAJson(r.body) || {};\n  return consultes.map((q, i) => ({ consulta: q, productes: (((j.results || [])[i] || {}).hits || []).map(compactaProducte) }));\n}\n// ── Fi cerca ──\n\nconst c = $('Entrada i config').first().json;\nconst d = c.dades || {};\nconst consultes = (d.consultes || (d.text ? [d.text] : [])).map((x) => String(x).trim()).filter(Boolean).slice(0, 40);\nif (!consultes.length) return [{ json: { ok: false, accio: 'cercar', error: 'Falta «consultes» (llista de textos a cercar).' } }];\ntry {\n  const resultat = await cercaProductes(c, consultes, Math.min(Number(d.max) || 6, 20));\n  return [{ json: { ok: true, accio: 'cercar', resultat } }];\n} catch (e) {\n  return [{ json: { ok: false, accio: 'cercar', error: e.message } }];\n}\n"
+      },
+      "id": "a7a0c29f-df8b-4806-ab45-6b8e81d83cc0",
+      "name": "Cerca productes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Entrada i config').first().json.base }}/api/customers/{{ $('Entrada i config').first().json.client }}/recommendations/myregulars/precision/?lang={{ $('Entrada i config').first().json.idioma }}&wh={{ $('Entrada i config').first().json.wh }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "20f43ac0-9e85-4f26-a621-af02a453b97d",
+      "name": "Llegeix habituals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        -140
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Cerca de productes del Mercadona (pública, la mateixa que fa la web) ──\n// No hi ha cap clau escrita: la configuració pública de cerca es llegeix de la web cada setmana.\nasync function configCerca(c) {\n  const sd = $getWorkflowStaticData('global');\n  if (sd.mercaCerca && sd.mercaCerca.caduca > Date.now()) return sd.mercaCerca;\n  const get = async (url) => comATexte((await H.httpRequest({\n    method: 'GET', url, headers: { 'User-Agent': c.userAgent, Accept: '*/*' },\n    returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n  })).body);\n  const home = await get(c.base + '/');\n  const scripts = [...home.matchAll(/<script[^>]+src=[\"']([^\"']+\\.js)[\"']/gi)].map((m) => absoluta(m[1], c.base + '/'));\n  let trobat = null;\n  for (const s of scripts.slice(0, 8)) {\n    const js = await get(s);\n    const m = js.match(/\"([A-Z0-9]{10})\",[A-Za-z0-9_$]+=\"([0-9a-f]{32})\"/);\n    if (m) { trobat = { app: m[1], clau: m[2] }; break; }\n  }\n  if (!trobat) throw new Error('No trobo la configuració de cerca a la web del Mercadona (pot haver canviat).');\n  sd.mercaCerca = { ...trobat, caduca: Date.now() + 7 * 86400000 };\n  return sd.mercaCerca;\n}\nconst compactaProducte = (p) => {\n  const pi = p.price_instructions || {};\n  return {\n    id: String(p.id),\n    nom: p.display_name,\n    format: [p.packaging, pi.unit_size && pi.size_format ? `${pi.unit_size} ${pi.size_format}` : ''].filter(Boolean).join(' · '),\n    preu: pi.unit_price != null ? Number(pi.unit_price) : null,\n    preuRef: pi.reference_price ? `${pi.reference_price} €/${pi.reference_format || ''}` : null,\n  };\n};\nasync function cercaProductes(c, consultes, perConsulta) {\n  const cfg = await configCerca(c);\n  const host = c.algoliaHost || `https://${cfg.app.toLowerCase()}-dsn.algolia.net`;\n  const index = `products_prod_${c.wh}_${c.idioma}`;\n  const r = await H.httpRequest({\n    method: 'POST', url: `${host}/1/indexes/*/queries`,\n    headers: { 'X-Algolia-API-Key': cfg.clau, 'X-Algolia-Application-Id': cfg.app, 'Content-Type': 'application/json', Accept: 'application/json' },\n    body: JSON.stringify({ requests: consultes.map((q) => ({ indexName: index, params: qs({ query: q, hitsPerPage: perConsulta }) })) }),\n    returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n  });\n  if (r.statusCode >= 400) {\n    $getWorkflowStaticData('global').mercaCerca = null;\n    throw new Error(`La cerca del Mercadona ha fallat (HTTP ${r.statusCode}). Torna-ho a provar.`);\n  }\n  const j = comAJson(r.body) || {};\n  return consultes.map((q, i) => ({ consulta: q, productes: (((j.results || [])[i] || {}).hits || []).map(compactaProducte) }));\n}\n// ── Fi cerca ──\n\n// ── Eines del carro del Mercadona ──\nconst comprovaResposta = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('El token del Mercadona ha caducat o no és vàlid (dura unes 6 setmanes). Renova\\'l a la credencial «Mercadona (token)».');\n  if (st === 403) throw new Error(`El Mercadona ha respost 403 en ${que}. Pot ser l'ID de client equivocat o un bloqueig des de n8n.`);\n  if (!st || st >= 400) throw new Error(`Mercadona (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  const b = comAJson(cosResposta(r));\n  if (!b || typeof b !== 'object') throw new Error(`Mercadona (${que}): resposta inesperada (potser una pàgina de bloqueig).`);\n  return b;\n};\nconst idLinia = (l) => String(l.product_id || (l.product && l.product.id));\nconst liniesDe = (cart) => (cart.lines || []).map((l) => ({\n  product_id: idLinia(l),\n  quantity: Number(l.quantity),\n  sources: Array.isArray(l.sources) ? l.sources : [],\n}));\nconst resumCarro = (cart) => {\n  const productes = (cart.lines || []).map((l) => ({\n    id: idLinia(l),\n    nom: l.product && l.product.display_name,\n    quantitat: Number(l.quantity),\n    preu: l.product && l.product.price_instructions && l.product.price_instructions.unit_price != null ? Number(l.product.price_instructions.unit_price) : null,\n  }));\n  const total = cart.summary && cart.summary.total != null ? Number(cart.summary.total) : null;\n  return { productes, total, arribaAlMinim60: total == null ? null : total >= 60 };\n};\n// ── Fi eines del carro ──\n\nconst c = $('Entrada i config').first().json;\nconst b = comprovaResposta($input.first().json, 'llegir els habituals');\nconst prods = [];\nconst vist = new Set();\nconst recorre = (o, extra) => {\n  if (!o || typeof o !== 'object') return;\n  if (Array.isArray(o)) { o.forEach((x) => recorre(x)); return; }\n  if (o.product && typeof o.product === 'object' && o.product.id != null) {\n    recorre(o.product, { quantitatHabitual: o.recommended_quantity ?? o.selling_method ?? undefined });\n    return;\n  }\n  if (o.id != null && o.display_name) {\n    const id = String(o.id);\n    if (!vist.has(id)) { vist.add(id); prods.push({ ...compactaProducte(o), ...(extra && extra.quantitatHabitual != null ? { quantitatHabitual: extra.quantitatHabitual } : {}) }); }\n    return;\n  }\n  Object.values(o).forEach((x) => recorre(x));\n};\nrecorre(b);\nconst filtre = c.dades && c.dades.text ? String(c.dades.text).toLowerCase() : '';\nconst resultat = filtre ? prods.filter((p) => String(p.nom).toLowerCase().includes(filtre)) : prods;\nreturn [{ json: { ok: true, accio: 'habituals', total: resultat.length, resultat } }];\n"
+      },
+      "id": "f4e17b5e-ded9-4b14-a607-13942e326254",
+      "name": "Resum habituals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Entrada i config').first().json.urlCarro }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "d8d880e7-cf77-4874-a59e-c2f424339f28",
+      "name": "Llegeix carro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        20
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines del carro del Mercadona ──\nconst comprovaResposta = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('El token del Mercadona ha caducat o no és vàlid (dura unes 6 setmanes). Renova\\'l a la credencial «Mercadona (token)».');\n  if (st === 403) throw new Error(`El Mercadona ha respost 403 en ${que}. Pot ser l'ID de client equivocat o un bloqueig des de n8n.`);\n  if (!st || st >= 400) throw new Error(`Mercadona (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  const b = comAJson(cosResposta(r));\n  if (!b || typeof b !== 'object') throw new Error(`Mercadona (${que}): resposta inesperada (potser una pàgina de bloqueig).`);\n  return b;\n};\nconst idLinia = (l) => String(l.product_id || (l.product && l.product.id));\nconst liniesDe = (cart) => (cart.lines || []).map((l) => ({\n  product_id: idLinia(l),\n  quantity: Number(l.quantity),\n  sources: Array.isArray(l.sources) ? l.sources : [],\n}));\nconst resumCarro = (cart) => {\n  const productes = (cart.lines || []).map((l) => ({\n    id: idLinia(l),\n    nom: l.product && l.product.display_name,\n    quantitat: Number(l.quantity),\n    preu: l.product && l.product.price_instructions && l.product.price_instructions.unit_price != null ? Number(l.product.price_instructions.unit_price) : null,\n  }));\n  const total = cart.summary && cart.summary.total != null ? Number(cart.summary.total) : null;\n  return { productes, total, arribaAlMinim60: total == null ? null : total >= 60 };\n};\n// ── Fi eines del carro ──\n\nconst cart = comprovaResposta($input.first().json, 'llegir el carro');\nreturn [{ json: { ok: true, accio: 'carro', resultat: resumCarro(cart) } }];\n"
+      },
+      "id": "60eac3a0-bd37-48a3-a98e-866f78cda34c",
+      "name": "Resum carro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Entrada i config').first().json.urlCarro }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "567936b1-eae4-4cd6-a8c5-7c27ca04c1da",
+      "name": "Llegeix carro abans",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        180
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines del carro del Mercadona ──\nconst comprovaResposta = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('El token del Mercadona ha caducat o no és vàlid (dura unes 6 setmanes). Renova\\'l a la credencial «Mercadona (token)».');\n  if (st === 403) throw new Error(`El Mercadona ha respost 403 en ${que}. Pot ser l'ID de client equivocat o un bloqueig des de n8n.`);\n  if (!st || st >= 400) throw new Error(`Mercadona (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  const b = comAJson(cosResposta(r));\n  if (!b || typeof b !== 'object') throw new Error(`Mercadona (${que}): resposta inesperada (potser una pàgina de bloqueig).`);\n  return b;\n};\nconst idLinia = (l) => String(l.product_id || (l.product && l.product.id));\nconst liniesDe = (cart) => (cart.lines || []).map((l) => ({\n  product_id: idLinia(l),\n  quantity: Number(l.quantity),\n  sources: Array.isArray(l.sources) ? l.sources : [],\n}));\nconst resumCarro = (cart) => {\n  const productes = (cart.lines || []).map((l) => ({\n    id: idLinia(l),\n    nom: l.product && l.product.display_name,\n    quantitat: Number(l.quantity),\n    preu: l.product && l.product.price_instructions && l.product.price_instructions.unit_price != null ? Number(l.product.price_instructions.unit_price) : null,\n  }));\n  const total = cart.summary && cart.summary.total != null ? Number(cart.summary.total) : null;\n  return { productes, total, arribaAlMinim60: total == null ? null : total >= 60 };\n};\n// ── Fi eines del carro ──\n\nconst c = $('Entrada i config').first().json;\nconst d = c.dades || {};\nconst cart = comprovaResposta($input.first().json, 'llegir el carro');\nconst mapa = new Map(liniesDe(cart).map((l) => [l.product_id, l]));\nconst canvis = [];\nconst MAX = d.permetreQuantitatsAltes === true ? 100 : 12;\nif (c.accio === 'posar') {\n  const modeGeneral = d.mode === 'exacte' ? 'exacte' : 'minim';\n  for (const x of d.linies || []) {\n    const id = String(x.id ?? x.product_id ?? '').trim();\n    const q = Number(x.quantitat ?? x.quantity ?? 1);\n    const mode = x.mode === 'exacte' || x.mode === 'minim' ? x.mode : modeGeneral;\n    if (!id || !Number.isFinite(q) || q < 0) { canvis.push({ id, error: 'id o quantitat incorrectes' }); continue; }\n    if (q > MAX) { canvis.push({ id, error: `quantitat ${q} massa alta (màxim ${MAX}; si és correcte, posa \"permetreQuantitatsAltes\": true)` }); continue; }\n    const abans = mapa.has(id) ? mapa.get(id).quantity : 0;\n    const despres = mode === 'exacte' ? q : Math.max(abans, q);\n    if (despres === abans) { canvis.push({ id, abans, despres, senseCanvi: true }); continue; }\n    if (despres === 0) mapa.delete(id);\n    else if (mapa.has(id)) mapa.get(id).quantity = despres;\n    else mapa.set(id, { product_id: id, quantity: despres, sources: [] });\n    canvis.push({ id, abans, despres });\n  }\n} else if (c.accio === 'treure') {\n  for (const raw of d.ids || []) {\n    const id = String(raw);\n    if (mapa.has(id)) { canvis.push({ id, abans: mapa.get(id).quantity, despres: 0 }); mapa.delete(id); }\n    else canvis.push({ id, noHiEra: true });\n  }\n}\nconst cos = { id: cart.id, ...(cart.version !== undefined ? { version: cart.version } : {}), lines: [...mapa.values()] };\nreturn [{ json: { cos, canvis } }];\n"
+      },
+      "id": "85cf88d3-4a1a-4c10-aac1-5cfd26cde91a",
+      "name": "Calcula carro nou",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Entrada i config').first().json.urlCarro }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cos) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "2b6c42c8-20fe-48a0-abc7-fdeaac8eeac5",
+      "name": "Desa carro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        180
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines del carro del Mercadona ──\nconst comprovaResposta = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('El token del Mercadona ha caducat o no és vàlid (dura unes 6 setmanes). Renova\\'l a la credencial «Mercadona (token)».');\n  if (st === 403) throw new Error(`El Mercadona ha respost 403 en ${que}. Pot ser l'ID de client equivocat o un bloqueig des de n8n.`);\n  if (!st || st >= 400) throw new Error(`Mercadona (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  const b = comAJson(cosResposta(r));\n  if (!b || typeof b !== 'object') throw new Error(`Mercadona (${que}): resposta inesperada (potser una pàgina de bloqueig).`);\n  return b;\n};\nconst idLinia = (l) => String(l.product_id || (l.product && l.product.id));\nconst liniesDe = (cart) => (cart.lines || []).map((l) => ({\n  product_id: idLinia(l),\n  quantity: Number(l.quantity),\n  sources: Array.isArray(l.sources) ? l.sources : [],\n}));\nconst resumCarro = (cart) => {\n  const productes = (cart.lines || []).map((l) => ({\n    id: idLinia(l),\n    nom: l.product && l.product.display_name,\n    quantitat: Number(l.quantity),\n    preu: l.product && l.product.price_instructions && l.product.price_instructions.unit_price != null ? Number(l.product.price_instructions.unit_price) : null,\n  }));\n  const total = cart.summary && cart.summary.total != null ? Number(cart.summary.total) : null;\n  return { productes, total, arribaAlMinim60: total == null ? null : total >= 60 };\n};\n// ── Fi eines del carro ──\n\nconst c = $('Entrada i config').first().json;\nconst cart = comprovaResposta($input.first().json, 'desar el carro');\nreturn [{ json: { ok: true, accio: c.accio, canvis: $('Calcula carro nou').first().json.canvis, resultat: resumCarro(cart) } }];\n"
+      },
+      "id": "9b557360-7ff8-43dc-aa0b-982b2308088e",
+      "name": "Resultat carro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Cerca de productes del Mercadona (pública, la mateixa que fa la web) ──\n// No hi ha cap clau escrita: la configuració pública de cerca es llegeix de la web cada setmana.\nasync function configCerca(c) {\n  const sd = $getWorkflowStaticData('global');\n  if (sd.mercaCerca && sd.mercaCerca.caduca > Date.now()) return sd.mercaCerca;\n  const get = async (url) => comATexte((await H.httpRequest({\n    method: 'GET', url, headers: { 'User-Agent': c.userAgent, Accept: '*/*' },\n    returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n  })).body);\n  const home = await get(c.base + '/');\n  const scripts = [...home.matchAll(/<script[^>]+src=[\"']([^\"']+\\.js)[\"']/gi)].map((m) => absoluta(m[1], c.base + '/'));\n  let trobat = null;\n  for (const s of scripts.slice(0, 8)) {\n    const js = await get(s);\n    const m = js.match(/\"([A-Z0-9]{10})\",[A-Za-z0-9_$]+=\"([0-9a-f]{32})\"/);\n    if (m) { trobat = { app: m[1], clau: m[2] }; break; }\n  }\n  if (!trobat) throw new Error('No trobo la configuració de cerca a la web del Mercadona (pot haver canviat).');\n  sd.mercaCerca = { ...trobat, caduca: Date.now() + 7 * 86400000 };\n  return sd.mercaCerca;\n}\nconst compactaProducte = (p) => {\n  const pi = p.price_instructions || {};\n  return {\n    id: String(p.id),\n    nom: p.display_name,\n    format: [p.packaging, pi.unit_size && pi.size_format ? `${pi.unit_size} ${pi.size_format}` : ''].filter(Boolean).join(' · '),\n    preu: pi.unit_price != null ? Number(pi.unit_price) : null,\n    preuRef: pi.reference_price ? `${pi.reference_price} €/${pi.reference_format || ''}` : null,\n  };\n};\nasync function cercaProductes(c, consultes, perConsulta) {\n  const cfg = await configCerca(c);\n  const host = c.algoliaHost || `https://${cfg.app.toLowerCase()}-dsn.algolia.net`;\n  const index = `products_prod_${c.wh}_${c.idioma}`;\n  const r = await H.httpRequest({\n    method: 'POST', url: `${host}/1/indexes/*/queries`,\n    headers: { 'X-Algolia-API-Key': cfg.clau, 'X-Algolia-Application-Id': cfg.app, 'Content-Type': 'application/json', Accept: 'application/json' },\n    body: JSON.stringify({ requests: consultes.map((q) => ({ indexName: index, params: qs({ query: q, hitsPerPage: perConsulta }) })) }),\n    returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n  });\n  if (r.statusCode >= 400) {\n    $getWorkflowStaticData('global').mercaCerca = null;\n    throw new Error(`La cerca del Mercadona ha fallat (HTTP ${r.statusCode}). Torna-ho a provar.`);\n  }\n  const j = comAJson(r.body) || {};\n  return consultes.map((q, i) => ({ consulta: q, productes: (((j.results || [])[i] || {}).hits || []).map(compactaProducte) }));\n}\n// ── Fi cerca ──\n\nconst c = $('Entrada i config').first().json;\nconst d = c.dades || {};\nlet producte;\nif (d.id) producte = { id: String(d.id), nom: '(id indicat)' };\nelse {\n  const r = await cercaProductes(c, [d.text || 'sal fina'], 1);\n  producte = r[0].productes[0];\n  if (!producte) throw new Error('La cerca de prova no ha trobat cap producte.');\n}\nreturn [{ json: { producte } }];\n"
+      },
+      "id": "ac5f19ad-5a9f-477e-a666-aaaac58cd5b7",
+      "name": "Prova: tria producte",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Entrada i config').first().json.urlCarro }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "e7cba508-7b68-4237-ac3a-56add80954ca",
+      "name": "Prova: llegeix carro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        360
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines del carro del Mercadona ──\nconst comprovaResposta = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('El token del Mercadona ha caducat o no és vàlid (dura unes 6 setmanes). Renova\\'l a la credencial «Mercadona (token)».');\n  if (st === 403) throw new Error(`El Mercadona ha respost 403 en ${que}. Pot ser l'ID de client equivocat o un bloqueig des de n8n.`);\n  if (!st || st >= 400) throw new Error(`Mercadona (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  const b = comAJson(cosResposta(r));\n  if (!b || typeof b !== 'object') throw new Error(`Mercadona (${que}): resposta inesperada (potser una pàgina de bloqueig).`);\n  return b;\n};\nconst idLinia = (l) => String(l.product_id || (l.product && l.product.id));\nconst liniesDe = (cart) => (cart.lines || []).map((l) => ({\n  product_id: idLinia(l),\n  quantity: Number(l.quantity),\n  sources: Array.isArray(l.sources) ? l.sources : [],\n}));\nconst resumCarro = (cart) => {\n  const productes = (cart.lines || []).map((l) => ({\n    id: idLinia(l),\n    nom: l.product && l.product.display_name,\n    quantitat: Number(l.quantity),\n    preu: l.product && l.product.price_instructions && l.product.price_instructions.unit_price != null ? Number(l.product.price_instructions.unit_price) : null,\n  }));\n  const total = cart.summary && cart.summary.total != null ? Number(cart.summary.total) : null;\n  return { productes, total, arribaAlMinim60: total == null ? null : total >= 60 };\n};\n// ── Fi eines del carro ──\n\nconst cart = comprovaResposta($input.first().json, 'llegir el carro');\nconst producte = $('Prova: tria producte').first().json.producte;\nconst original = liniesDe(cart);\nconst nou = original.map((l) => ({ ...l }));\nconst ex = nou.find((l) => l.product_id === producte.id);\nconst abans = ex ? ex.quantity : 0;\nif (ex) ex.quantity += 1; else nou.push({ product_id: producte.id, quantity: 1, sources: [] });\nreturn [{ json: { cos: { id: cart.id, ...(cart.version !== undefined ? { version: cart.version } : {}), lines: nou }, original, abans, producte } }];\n"
+      },
+      "id": "959a71a2-d8ad-41ac-a088-fc4dcc4f8b86",
+      "name": "Prova: +1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Entrada i config').first().json.urlCarro }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cos) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "59d91573-cc42-4b6c-afb3-facc70c06e62",
+      "name": "Prova: desa +1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        360
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Entrada i config').first().json.urlCarro }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "f155c540-f98b-4cca-a95c-170eaf98f639",
+      "name": "Prova: comprova",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1580,
+        360
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines del carro del Mercadona ──\nconst comprovaResposta = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('El token del Mercadona ha caducat o no és vàlid (dura unes 6 setmanes). Renova\\'l a la credencial «Mercadona (token)».');\n  if (st === 403) throw new Error(`El Mercadona ha respost 403 en ${que}. Pot ser l'ID de client equivocat o un bloqueig des de n8n.`);\n  if (!st || st >= 400) throw new Error(`Mercadona (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  const b = comAJson(cosResposta(r));\n  if (!b || typeof b !== 'object') throw new Error(`Mercadona (${que}): resposta inesperada (potser una pàgina de bloqueig).`);\n  return b;\n};\nconst idLinia = (l) => String(l.product_id || (l.product && l.product.id));\nconst liniesDe = (cart) => (cart.lines || []).map((l) => ({\n  product_id: idLinia(l),\n  quantity: Number(l.quantity),\n  sources: Array.isArray(l.sources) ? l.sources : [],\n}));\nconst resumCarro = (cart) => {\n  const productes = (cart.lines || []).map((l) => ({\n    id: idLinia(l),\n    nom: l.product && l.product.display_name,\n    quantitat: Number(l.quantity),\n    preu: l.product && l.product.price_instructions && l.product.price_instructions.unit_price != null ? Number(l.product.price_instructions.unit_price) : null,\n  }));\n  const total = cart.summary && cart.summary.total != null ? Number(cart.summary.total) : null;\n  return { productes, total, arribaAlMinim60: total == null ? null : total >= 60 };\n};\n// ── Fi eines del carro ──\n\nconst cart = comprovaResposta($input.first().json, 'tornar a llegir el carro');\nconst p = $('Prova: +1').first().json;\nconst desat = $('Prova: desa +1').first().json;\nconst ara = liniesDe(cart).find((l) => l.product_id === p.producte.id);\nconst afegit = !!ara && ara.quantity === p.abans + 1;\nreturn [{ json: {\n  cos: { id: cart.id, ...(cart.version !== undefined ? { version: cart.version } : {}), lines: p.original },\n  afegit, quantitatDespres: ara ? ara.quantity : 0, estatDesar: desat.statusCode,\n} }];\n"
+      },
+      "id": "76d57a42-d7d9-47e2-a874-d42e1567e823",
+      "name": "Prova: restaura",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Entrada i config').first().json.urlCarro }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cos) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "4bb8d0f1-2cd7-4aae-a391-c7ec73256b7f",
+      "name": "Prova: desa original",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2020,
+        360
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Entrada i config').first().json.urlCarro }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Entrada i config').first().json.userAgent }}"
+            },
+            {
+              "name": "Referer",
+              "value": "={{ $('Entrada i config').first().json.base }}/"
+            },
+            {
+              "name": "Origin",
+              "value": "={{ $('Entrada i config').first().json.base }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "autodetect"
+            }
+          }
+        }
+      },
+      "id": "8a747e51-f37e-441c-a2a6-fba8dd16fc04",
+      "name": "Prova: comprova final",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        360
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Mercadona (token)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines del carro del Mercadona ──\nconst comprovaResposta = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('El token del Mercadona ha caducat o no és vàlid (dura unes 6 setmanes). Renova\\'l a la credencial «Mercadona (token)».');\n  if (st === 403) throw new Error(`El Mercadona ha respost 403 en ${que}. Pot ser l'ID de client equivocat o un bloqueig des de n8n.`);\n  if (!st || st >= 400) throw new Error(`Mercadona (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  const b = comAJson(cosResposta(r));\n  if (!b || typeof b !== 'object') throw new Error(`Mercadona (${que}): resposta inesperada (potser una pàgina de bloqueig).`);\n  return b;\n};\nconst idLinia = (l) => String(l.product_id || (l.product && l.product.id));\nconst liniesDe = (cart) => (cart.lines || []).map((l) => ({\n  product_id: idLinia(l),\n  quantity: Number(l.quantity),\n  sources: Array.isArray(l.sources) ? l.sources : [],\n}));\nconst resumCarro = (cart) => {\n  const productes = (cart.lines || []).map((l) => ({\n    id: idLinia(l),\n    nom: l.product && l.product.display_name,\n    quantitat: Number(l.quantity),\n    preu: l.product && l.product.price_instructions && l.product.price_instructions.unit_price != null ? Number(l.product.price_instructions.unit_price) : null,\n  }));\n  const total = cart.summary && cart.summary.total != null ? Number(cart.summary.total) : null;\n  return { productes, total, arribaAlMinim60: total == null ? null : total >= 60 };\n};\n// ── Fi eines del carro ──\n\nconst cart = comprovaResposta($input.first().json, 'llegir el carro final');\nconst p = $('Prova: +1').first().json;\nconst r = $('Prova: restaura').first().json;\nconst clau = (ls) => JSON.stringify(ls.map((l) => [l.product_id, l.quantity]).sort());\nconst restaurat = clau(liniesDe(cart)) === clau(p.original);\nconst ok = r.afegit && restaurat;\nreturn [{ json: {\n  ok, accio: 'prova', producte: p.producte,\n  afegit: r.afegit, restaurat,\n  missatge: ok\n    ? `Prova correcta: he afegit 1 × «${p.producte.nom}» al carro i després l'he tret. El carro ha quedat com estava.`\n    : `La prova NO ha anat bé (afegit: ${r.afegit}, restaurat: ${restaurat}, estat en desar: ${r.estatDesar}). Revisa el carro a la web.`,\n  carro: resumCarro(cart),\n} }];\n"
+      },
+      "id": "2c9216fd-2b24-496b-a5d9-07c7165c98f2",
+      "name": "Prova: informe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2460,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\nconst c = $('Entrada i config').first().json;\nreturn [{ json: { ok: false, accio: c.accio, error: `Acció desconeguda: «${c.accio}». Vàlides: cercar, habituals, carro, posar, treure, prova.` } }];\n"
+      },
+      "id": "4331cf7d-b594-4042-a402-fef08d7ea1d7",
+      "name": "Acció desconeguda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Mercadona (només el carro)\nCerca productes, llegeix el carro i hi posa o en treu productes. **No pot fer ni pagar cap comanda.**\n\n**Credencial:** «Mercadona (token)», tipus *Header Auth*:\nName `Authorization` · Value `Bearer <token de la web>` (dura unes 6 setmanes).\n\n**Configura:** el teu ID de client al node «Entrada i config».\n\n**Prova:** botó «Execute workflow». Afegeix 1 producte (sal) al carro i el torna a treure.",
+        "width": 560,
+        "height": 320
+      },
+      "id": "d4736a5d-c1e1-4935-a25a-93b999848870",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -460
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Quan el crida Claude": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova manual": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada i config": {
+      "main": [
+        [
+          {
+            "node": "Quina acció?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quina acció?": {
+      "main": [
+        [
+          {
+            "node": "Cerca productes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Llegeix habituals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Llegeix carro",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Llegeix carro abans",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prova: tria producte",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acció desconeguda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llegeix habituals": {
+      "main": [
+        [
+          {
+            "node": "Resum habituals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llegeix carro": {
+      "main": [
+        [
+          {
+            "node": "Resum carro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llegeix carro abans": {
+      "main": [
+        [
+          {
+            "node": "Calcula carro nou",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcula carro nou": {
+      "main": [
+        [
+          {
+            "node": "Desa carro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Desa carro": {
+      "main": [
+        [
+          {
+            "node": "Resultat carro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova: tria producte": {
+      "main": [
+        [
+          {
+            "node": "Prova: llegeix carro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova: llegeix carro": {
+      "main": [
+        [
+          {
+            "node": "Prova: +1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova: +1": {
+      "main": [
+        [
+          {
+            "node": "Prova: desa +1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova: desa +1": {
+      "main": [
+        [
+          {
+            "node": "Prova: comprova",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova: comprova": {
+      "main": [
+        [
+          {
+            "node": "Prova: restaura",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova: restaura": {
+      "main": [
+        [
+          {
+            "node": "Prova: desa original",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova: desa original": {
+      "main": [
+        [
+          {
+            "node": "Prova: comprova final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova: comprova final": {
+      "main": [
+        [
+          {
+            "node": "Prova: informe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Europe/Madrid"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

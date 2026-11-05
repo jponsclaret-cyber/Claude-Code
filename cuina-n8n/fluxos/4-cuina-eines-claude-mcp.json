@@ -1,0 +1,235 @@
+{
+  "name": "Cuina · Eines per a Claude (MCP)",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "n8nOAuth2",
+        "path": "cuina-ccda21bc1c04",
+        "instructions": "Eines de la cuina d'en Jimix: Cookidoo, carro del Mercadona i calendaris d'iCloud. Normes: mai confirmis ni paguis cap comanda (l'eina del Mercadona només omple el carro); no enviïs missatges en nom seu; no buidis la llista del Cookidoo sense que formi part del procés setmanal. Totes les eines reben «accio» i «dades» (un text JSON)."
+      },
+      "id": "cb8db216-9949-45b7-a19c-7240078dc732",
+      "name": "MCP Server Trigger",
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 2,
+      "position": [
+        600,
+        0
+      ],
+      "webhookId": "79fc63a4-7774-4605-ad51-e2be9f502238"
+    },
+    {
+      "parameters": {
+        "description": "Cookidoo d'en Jimix (Thermomix, cookidoo.es, es-ES). Paràmetres: «accio» i «dades» (text JSON).\nAccions:\n- setmana_llegir: {\"data\":\"AAAA-MM-DD\",\"dies\":7} → receptes de «Mi semana» per dia.\n- setmana_afegir: {\"entrades\":[{\"dia\":\"AAAA-MM-DD\",\"recepta\":\"r123\"}]} → les afegeix en aquest ordre. Cada recepta afegida queda la PRIMERA del dia, així que cal afegir-les al revés (sopar 2n, sopar 1r, dinar 2n, dinar 1r).\n- setmana_treure: {\"entrades\":[{\"dia\":\"AAAA-MM-DD\",\"recepta\":\"r123\"}]}\n- receptes: {\"ids\":[\"r123\",\"r456\"],\"variants\":true} → títol, racions, temps, ingredients, «llegum» (ingredients que coincideixen amb el filtre de llegum, o false) i variants de racions (altres rID).\n- colleccions: {\"nom\":\"SOPAR\"} (filtra pel nom; sense nom, totes) o {\"nomesNoms\":true} o {\"tipus\":\"oficials\"} → llistes amb les seves receptes.\n- cercar: {\"text\":\"crema de calabacín\"} → receptes del catàleg.\n- llista_llegir: {} → llista de la compra (receptes, ingredients i articles afegits a mà).\n- llista_afegir: {\"articles\":[\"🥬 Ceba – 1 kg\",\"🥛 Llet – 1 L\"]}\n- llista_treure: {\"ids\":[\"id-de-l-article\"]}\n- llista_buidar: {\"confirmo\":true} → esborra TOTA la llista de la compra.\nResposta: {\"ok\":true,\"resultat\":…} o {\"ok\":false,\"error\":\"…\"}.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Cuina · Cookidoo"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "accio": "={{ $fromAI('accio', 'Acció a fer (vegeu la descripció de l\\'eina)', 'string') }}",
+            "dades": "={{ $fromAI('dades', 'Text JSON amb les dades de l\\'acció, per exemple {} o {\"ids\":[\"r123\"]}', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "accio",
+              "displayName": "accio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "dades",
+              "displayName": "dades",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "ecd249ef-ee9b-452a-ac06-23a8611dcf12",
+      "name": "cookidoo",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        300,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "description": "Carro de tienda.mercadona.es d'en Jimix. NOMÉS omple el carro: no pot confirmar ni pagar comandes (ho fa ell). Paràmetres: «accio» i «dades» (text JSON).\nAccions:\n- cercar: {\"consultes\":[\"tomate pera\",\"huevos L\"],\"max\":6} → per a cada consulta, productes amb id, nom, format i preu.\n- habituals: {\"text\":\"leche\"} → productes que compra sovint («Mis habituales»), filtrats si poses text.\n- carro: {} → productes del carro, total i si arriba al mínim de 60 €.\n- posar: {\"linies\":[{\"id\":\"3400\",\"quantitat\":2}],\"mode\":\"minim\"} → \"minim\" (per defecte) només puja la quantitat fins a la indicada (es pot repetir sense duplicar res); \"exacte\" la deixa exactament així (0 = treure). Màxim 12 per producte si no poses \"permetreQuantitatsAltes\":true.\n- treure: {\"ids\":[\"3400\"]}\n- prova: {} → afegeix 1 producte de prova i el torna a treure.\nResposta: {\"ok\":true,\"resultat\":…} o un error. Si diu que el token ha caducat, avisa en Jimix perquè el renovi.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Cuina · Mercadona"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "accio": "={{ $fromAI('accio', 'Acció a fer (vegeu la descripció de l\\'eina)', 'string') }}",
+            "dades": "={{ $fromAI('dades', 'Text JSON amb les dades de l\\'acció, per exemple {} o {\"ids\":[\"r123\"]}', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "accio",
+              "displayName": "accio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "dades",
+              "displayName": "dades",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "63b9578d-b84e-46a3-a788-c5db7d0e8a56",
+      "name": "mercadona",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "description": "Calendaris d'iCloud d'en Jimix («Personal» per als avisos, «Família» per a l'arribada de la compra). Paràmetres: «accio» i «dades» (text JSON). Les hores són de Madrid.\nAccions:\n- llistar: {\"calendari\":\"Personal\",\"des_de\":\"2026-11-09\",\"fins_a\":\"2026-11-16\"} → esdeveniments amb títol, inici, fi i nombre d'alarmes.\n- crear: {\"calendari\":\"Personal\",\"esdeveniments\":[{\"titol\":\"❄️ Treure del congelador: …\",\"inici\":\"2026-11-09T20:00\",\"durada_min\":10,\"descripcio\":\"…\",\"alarma\":true}]} → crea els que no existeixen (mateix títol i hora = repetit, no el crea). L'alarma sona a l'hora exacta.\nResposta: {\"ok\":true,\"creats\":[…],\"repetits\":[…],\"errors\":[…]}.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Cuina · Calendari iCloud"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "accio": "={{ $fromAI('accio', 'Acció a fer (vegeu la descripció de l\\'eina)', 'string') }}",
+            "dades": "={{ $fromAI('dades', 'Text JSON amb les dades de l\\'acció, per exemple {} o {\"ids\":[\"r123\"]}', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "accio",
+              "displayName": "accio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "dades",
+              "displayName": "dades",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "74d6e975-5181-45fe-a101-0285bedff585",
+      "name": "calendari_icloud",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Connector per a Claude\nExposa els 3 fluxos com a eines MCP.\n\n1. A cada eina (cookidoo, mercadona, calendari_icloud), tria el flux corresponent a «Workflow».\n2. Activa (Publish) aquest flux.\n3. Copia la **Production URL** del node «MCP Server Trigger».\n4. A claude.ai → Configuració → Connectors → Afegeix connector personalitzat → enganxa la URL. Et demanarà entrar amb el teu compte de n8n (OAuth).",
+        "width": 560,
+        "height": 280
+      },
+      "id": "4bcb603c-bcc5-43c2-ac38-4d47f4aac6c3",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        -300
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "cookidoo": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "mercadona": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "calendari_icloud": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Europe/Madrid"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

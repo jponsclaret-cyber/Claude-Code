@@ -1,0 +1,490 @@
+{
+  "name": "Cuina · Calendari iCloud",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "accio"
+            },
+            {
+              "name": "dades"
+            }
+          ]
+        }
+      },
+      "id": "f1dd809b-199d-4d23-a19c-33d7f6c685bb",
+      "name": "Quan el crida Claude",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f2bf4689-ca86-4ef8-ac33-401f850b0cf6",
+      "name": "Prova manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines de CalDAV / iCalendar ──\nconst ZONA = 'Europe/Madrid';\nconst desXml = (s) => String(s)\n  .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1')\n  .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(+n))\n  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&amp;/g, '&');\nconst etiquetes = (xml, nom) => [...String(xml).matchAll(new RegExp(`<(?:[\\\\w-]+:)?${nom}(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</(?:[\\\\w-]+:)?${nom}>`, 'gi'))].map((m) => m[1]);\nconst respostes = (xml) => etiquetes(xml, 'response');\nconst hrefDe = (frag) => { const h = etiquetes(frag, 'href')[0]; return h ? desXml(h).trim() : null; };\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim().toLowerCase();\nconst xmlRespostaCalDav = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('iCloud ha rebutjat l\\'usuari o la contrasenya d\\'aplicació de la credencial «iCloud (calendari)».');\n  if (!st || st >= 400) throw new Error(`iCloud (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  return comATexte(cosResposta(r));\n};\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst utcIcs = (ts) => new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}/, '');\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nfunction icsDataAUtc(linia) {\n  // linia: \"DTSTART;TZID=Europe/Madrid:20261109T201500\" o \"DTSTART:20261109T191500Z\" o \"DTSTART;VALUE=DATE:20261109\"\n  const i = linia.indexOf(':');\n  const params = linia.slice(0, i);\n  const v = linia.slice(i + 1).trim();\n  const tz = (params.match(/TZID=([^;:]+)/i) || [])[1];\n  const m = v.match(/^(\\d{4})(\\d{2})(\\d{2})(?:T(\\d{2})(\\d{2})(\\d{2})(Z)?)?$/);\n  if (!m) return null;\n  const txt = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}`;\n  if (m[7] === 'Z') return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);\n  try { return localAUtc(txt, tz || ZONA); } catch (e) { return localAUtc(txt, ZONA); }\n}\nfunction llegeixEsdeveniments(ics) {\n  const linies = String(ics).replace(/\\r?\\n[ \\t]/g, '').split(/\\r?\\n/);\n  const evs = [];\n  let ev = null; let alarmes = 0; let dinsAlarma = false;\n  const desescapa = (s) => s.replace(/\\\\n/gi, '\\n').replace(/\\\\([,;\\\\])/g, '$1');\n  for (const l of linies) {\n    if (l === 'BEGIN:VEVENT') { ev = {}; alarmes = 0; continue; }\n    if (l === 'END:VEVENT') { if (ev) { ev.alarmes = alarmes; evs.push(ev); } ev = null; continue; }\n    if (!ev) continue;\n    if (l === 'BEGIN:VALARM') { alarmes++; dinsAlarma = true; continue; }\n    if (l === 'END:VALARM') { dinsAlarma = false; continue; }\n    if (dinsAlarma) continue;\n    const nom = l.split(/[;:]/)[0].toUpperCase();\n    const valor = l.slice(l.indexOf(':') + 1);\n    if (nom === 'SUMMARY') ev.titol = desescapa(valor);\n    else if (nom === 'DESCRIPTION') ev.descripcio = desescapa(valor);\n    else if (nom === 'UID') ev.uid = valor;\n    else if (nom === 'DTSTART') { ev.iniciTs = icsDataAUtc(l); ev.inici = ev.iniciTs != null ? horaMadrid(ev.iniciTs) : valor; }\n    else if (nom === 'DTEND') { ev.fiTs = icsDataAUtc(l); ev.fi = ev.fiTs != null ? horaMadrid(ev.fiTs) : valor; }\n  }\n  return evs;\n}\nconst escapaIcs = (s) => String(s || '').replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nfunction plega(linia) {\n  // RFC 5545: línies de 75 octets com a màxim\n  const bytes = Buffer.from(linia, 'utf8');\n  if (bytes.length <= 75) return linia;\n  const trossos = [];\n  let actual = '';\n  let mida = 0;\n  for (const ch of linia) {\n    const b = Buffer.byteLength(ch, 'utf8');\n    const max = trossos.length ? 74 : 75;\n    if (mida + b > max) { trossos.push(actual); actual = ''; mida = 0; }\n    actual += ch; mida += b;\n  }\n  trossos.push(actual);\n  return trossos.join('\\r\\n ');\n}\n// ── Fi CalDAV ──\n\n// ⚙️ CONFIGURACIÓ DEL CALENDARI D'iCLOUD\n// L'Apple ID i la contrasenya d'aplicació són a la credencial «iCloud (calendari)».\nconst CONFIG = {\n  caldav: 'https://caldav.icloud.com',\n  calendariPerDefecte: 'Personal',\n};\nconst ent = $input.first().json;\nlet accio = String(ent.accio || '').trim();\nlet dades = llegeixDades(ent.dades);\nif (!accio) { accio = 'prova'; dades = {}; } // execució manual: llegeix els esdeveniments dels 7 dies vinents\nreturn [{ json: { ...CONFIG, accio, dades } }];\n"
+      },
+      "id": "c2984449-4166-432b-ad93-bdedce3d8e88",
+      "name": "Entrada i config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ \"PROPFIND\" }}",
+        "url": "={{ $json.caldav }}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Depth",
+              "value": "0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/xml; charset=utf-8",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:current-user-principal/></d:prop></d:propfind>",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "ad73614a-738a-440a-a151-2d45dbbbbf5e",
+      "name": "Busca usuari",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        100
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "",
+          "name": "iCloud (calendari)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines de CalDAV / iCalendar ──\nconst ZONA = 'Europe/Madrid';\nconst desXml = (s) => String(s)\n  .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1')\n  .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(+n))\n  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&amp;/g, '&');\nconst etiquetes = (xml, nom) => [...String(xml).matchAll(new RegExp(`<(?:[\\\\w-]+:)?${nom}(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</(?:[\\\\w-]+:)?${nom}>`, 'gi'))].map((m) => m[1]);\nconst respostes = (xml) => etiquetes(xml, 'response');\nconst hrefDe = (frag) => { const h = etiquetes(frag, 'href')[0]; return h ? desXml(h).trim() : null; };\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim().toLowerCase();\nconst xmlRespostaCalDav = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('iCloud ha rebutjat l\\'usuari o la contrasenya d\\'aplicació de la credencial «iCloud (calendari)».');\n  if (!st || st >= 400) throw new Error(`iCloud (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  return comATexte(cosResposta(r));\n};\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst utcIcs = (ts) => new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}/, '');\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nfunction icsDataAUtc(linia) {\n  // linia: \"DTSTART;TZID=Europe/Madrid:20261109T201500\" o \"DTSTART:20261109T191500Z\" o \"DTSTART;VALUE=DATE:20261109\"\n  const i = linia.indexOf(':');\n  const params = linia.slice(0, i);\n  const v = linia.slice(i + 1).trim();\n  const tz = (params.match(/TZID=([^;:]+)/i) || [])[1];\n  const m = v.match(/^(\\d{4})(\\d{2})(\\d{2})(?:T(\\d{2})(\\d{2})(\\d{2})(Z)?)?$/);\n  if (!m) return null;\n  const txt = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}`;\n  if (m[7] === 'Z') return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);\n  try { return localAUtc(txt, tz || ZONA); } catch (e) { return localAUtc(txt, ZONA); }\n}\nfunction llegeixEsdeveniments(ics) {\n  const linies = String(ics).replace(/\\r?\\n[ \\t]/g, '').split(/\\r?\\n/);\n  const evs = [];\n  let ev = null; let alarmes = 0; let dinsAlarma = false;\n  const desescapa = (s) => s.replace(/\\\\n/gi, '\\n').replace(/\\\\([,;\\\\])/g, '$1');\n  for (const l of linies) {\n    if (l === 'BEGIN:VEVENT') { ev = {}; alarmes = 0; continue; }\n    if (l === 'END:VEVENT') { if (ev) { ev.alarmes = alarmes; evs.push(ev); } ev = null; continue; }\n    if (!ev) continue;\n    if (l === 'BEGIN:VALARM') { alarmes++; dinsAlarma = true; continue; }\n    if (l === 'END:VALARM') { dinsAlarma = false; continue; }\n    if (dinsAlarma) continue;\n    const nom = l.split(/[;:]/)[0].toUpperCase();\n    const valor = l.slice(l.indexOf(':') + 1);\n    if (nom === 'SUMMARY') ev.titol = desescapa(valor);\n    else if (nom === 'DESCRIPTION') ev.descripcio = desescapa(valor);\n    else if (nom === 'UID') ev.uid = valor;\n    else if (nom === 'DTSTART') { ev.iniciTs = icsDataAUtc(l); ev.inici = ev.iniciTs != null ? horaMadrid(ev.iniciTs) : valor; }\n    else if (nom === 'DTEND') { ev.fiTs = icsDataAUtc(l); ev.fi = ev.fiTs != null ? horaMadrid(ev.fiTs) : valor; }\n  }\n  return evs;\n}\nconst escapaIcs = (s) => String(s || '').replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nfunction plega(linia) {\n  // RFC 5545: línies de 75 octets com a màxim\n  const bytes = Buffer.from(linia, 'utf8');\n  if (bytes.length <= 75) return linia;\n  const trossos = [];\n  let actual = '';\n  let mida = 0;\n  for (const ch of linia) {\n    const b = Buffer.byteLength(ch, 'utf8');\n    const max = trossos.length ? 74 : 75;\n    if (mida + b > max) { trossos.push(actual); actual = ''; mida = 0; }\n    actual += ch; mida += b;\n  }\n  trossos.push(actual);\n  return trossos.join('\\r\\n ');\n}\n// ── Fi CalDAV ──\n\nconst c = $('Entrada i config').first().json;\nconst xml = xmlRespostaCalDav($input.first().json, 'buscar l\\'usuari');\nconst frag = etiquetes(xml, 'current-user-principal')[0];\nconst href = frag && hrefDe(frag);\nif (!href) throw new Error('iCloud: no trobo el «current-user-principal».');\nreturn [{ json: { principal: absoluta(href, c.caldav + '/') } }];\n"
+      },
+      "id": "6e34d0cf-6169-4dc6-ab8e-1f75673b11bd",
+      "name": "Troba usuari",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ \"PROPFIND\" }}",
+        "url": "={{ $json.principal }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Depth",
+              "value": "0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/xml; charset=utf-8",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><c:calendar-home-set/></d:prop></d:propfind>",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "d9fb8ae5-f872-4943-a2be-3da2aed162dc",
+      "name": "Busca carpeta calendaris",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        100
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "",
+          "name": "iCloud (calendari)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines de CalDAV / iCalendar ──\nconst ZONA = 'Europe/Madrid';\nconst desXml = (s) => String(s)\n  .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1')\n  .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(+n))\n  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&amp;/g, '&');\nconst etiquetes = (xml, nom) => [...String(xml).matchAll(new RegExp(`<(?:[\\\\w-]+:)?${nom}(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</(?:[\\\\w-]+:)?${nom}>`, 'gi'))].map((m) => m[1]);\nconst respostes = (xml) => etiquetes(xml, 'response');\nconst hrefDe = (frag) => { const h = etiquetes(frag, 'href')[0]; return h ? desXml(h).trim() : null; };\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim().toLowerCase();\nconst xmlRespostaCalDav = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('iCloud ha rebutjat l\\'usuari o la contrasenya d\\'aplicació de la credencial «iCloud (calendari)».');\n  if (!st || st >= 400) throw new Error(`iCloud (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  return comATexte(cosResposta(r));\n};\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst utcIcs = (ts) => new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}/, '');\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nfunction icsDataAUtc(linia) {\n  // linia: \"DTSTART;TZID=Europe/Madrid:20261109T201500\" o \"DTSTART:20261109T191500Z\" o \"DTSTART;VALUE=DATE:20261109\"\n  const i = linia.indexOf(':');\n  const params = linia.slice(0, i);\n  const v = linia.slice(i + 1).trim();\n  const tz = (params.match(/TZID=([^;:]+)/i) || [])[1];\n  const m = v.match(/^(\\d{4})(\\d{2})(\\d{2})(?:T(\\d{2})(\\d{2})(\\d{2})(Z)?)?$/);\n  if (!m) return null;\n  const txt = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}`;\n  if (m[7] === 'Z') return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);\n  try { return localAUtc(txt, tz || ZONA); } catch (e) { return localAUtc(txt, ZONA); }\n}\nfunction llegeixEsdeveniments(ics) {\n  const linies = String(ics).replace(/\\r?\\n[ \\t]/g, '').split(/\\r?\\n/);\n  const evs = [];\n  let ev = null; let alarmes = 0; let dinsAlarma = false;\n  const desescapa = (s) => s.replace(/\\\\n/gi, '\\n').replace(/\\\\([,;\\\\])/g, '$1');\n  for (const l of linies) {\n    if (l === 'BEGIN:VEVENT') { ev = {}; alarmes = 0; continue; }\n    if (l === 'END:VEVENT') { if (ev) { ev.alarmes = alarmes; evs.push(ev); } ev = null; continue; }\n    if (!ev) continue;\n    if (l === 'BEGIN:VALARM') { alarmes++; dinsAlarma = true; continue; }\n    if (l === 'END:VALARM') { dinsAlarma = false; continue; }\n    if (dinsAlarma) continue;\n    const nom = l.split(/[;:]/)[0].toUpperCase();\n    const valor = l.slice(l.indexOf(':') + 1);\n    if (nom === 'SUMMARY') ev.titol = desescapa(valor);\n    else if (nom === 'DESCRIPTION') ev.descripcio = desescapa(valor);\n    else if (nom === 'UID') ev.uid = valor;\n    else if (nom === 'DTSTART') { ev.iniciTs = icsDataAUtc(l); ev.inici = ev.iniciTs != null ? horaMadrid(ev.iniciTs) : valor; }\n    else if (nom === 'DTEND') { ev.fiTs = icsDataAUtc(l); ev.fi = ev.fiTs != null ? horaMadrid(ev.fiTs) : valor; }\n  }\n  return evs;\n}\nconst escapaIcs = (s) => String(s || '').replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nfunction plega(linia) {\n  // RFC 5545: línies de 75 octets com a màxim\n  const bytes = Buffer.from(linia, 'utf8');\n  if (bytes.length <= 75) return linia;\n  const trossos = [];\n  let actual = '';\n  let mida = 0;\n  for (const ch of linia) {\n    const b = Buffer.byteLength(ch, 'utf8');\n    const max = trossos.length ? 74 : 75;\n    if (mida + b > max) { trossos.push(actual); actual = ''; mida = 0; }\n    actual += ch; mida += b;\n  }\n  trossos.push(actual);\n  return trossos.join('\\r\\n ');\n}\n// ── Fi CalDAV ──\n\nconst p = $input.first().json;\nconst xml = xmlRespostaCalDav(p, 'buscar la carpeta de calendaris');\nconst frag = etiquetes(xml, 'calendar-home-set')[0];\nconst href = frag && hrefDe(frag);\nif (!href) throw new Error('iCloud: no trobo el «calendar-home-set».');\nreturn [{ json: { home: absoluta(href, $('Troba usuari').first().json.principal) } }];\n"
+      },
+      "id": "b556e3f9-094a-423d-a76d-3b700bf4b142",
+      "name": "Troba carpeta calendaris",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ \"PROPFIND\" }}",
+        "url": "={{ $json.home }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Depth",
+              "value": "1"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/xml; charset=utf-8",
+        "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:displayname/><d:resourcetype/></d:prop></d:propfind>",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "4e00706f-06e9-471e-ac5e-bb46cec51aad",
+      "name": "Llista calendaris",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        100
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "",
+          "name": "iCloud (calendari)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines de CalDAV / iCalendar ──\nconst ZONA = 'Europe/Madrid';\nconst desXml = (s) => String(s)\n  .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1')\n  .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(+n))\n  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&amp;/g, '&');\nconst etiquetes = (xml, nom) => [...String(xml).matchAll(new RegExp(`<(?:[\\\\w-]+:)?${nom}(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</(?:[\\\\w-]+:)?${nom}>`, 'gi'))].map((m) => m[1]);\nconst respostes = (xml) => etiquetes(xml, 'response');\nconst hrefDe = (frag) => { const h = etiquetes(frag, 'href')[0]; return h ? desXml(h).trim() : null; };\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim().toLowerCase();\nconst xmlRespostaCalDav = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('iCloud ha rebutjat l\\'usuari o la contrasenya d\\'aplicació de la credencial «iCloud (calendari)».');\n  if (!st || st >= 400) throw new Error(`iCloud (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  return comATexte(cosResposta(r));\n};\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst utcIcs = (ts) => new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}/, '');\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nfunction icsDataAUtc(linia) {\n  // linia: \"DTSTART;TZID=Europe/Madrid:20261109T201500\" o \"DTSTART:20261109T191500Z\" o \"DTSTART;VALUE=DATE:20261109\"\n  const i = linia.indexOf(':');\n  const params = linia.slice(0, i);\n  const v = linia.slice(i + 1).trim();\n  const tz = (params.match(/TZID=([^;:]+)/i) || [])[1];\n  const m = v.match(/^(\\d{4})(\\d{2})(\\d{2})(?:T(\\d{2})(\\d{2})(\\d{2})(Z)?)?$/);\n  if (!m) return null;\n  const txt = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}`;\n  if (m[7] === 'Z') return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);\n  try { return localAUtc(txt, tz || ZONA); } catch (e) { return localAUtc(txt, ZONA); }\n}\nfunction llegeixEsdeveniments(ics) {\n  const linies = String(ics).replace(/\\r?\\n[ \\t]/g, '').split(/\\r?\\n/);\n  const evs = [];\n  let ev = null; let alarmes = 0; let dinsAlarma = false;\n  const desescapa = (s) => s.replace(/\\\\n/gi, '\\n').replace(/\\\\([,;\\\\])/g, '$1');\n  for (const l of linies) {\n    if (l === 'BEGIN:VEVENT') { ev = {}; alarmes = 0; continue; }\n    if (l === 'END:VEVENT') { if (ev) { ev.alarmes = alarmes; evs.push(ev); } ev = null; continue; }\n    if (!ev) continue;\n    if (l === 'BEGIN:VALARM') { alarmes++; dinsAlarma = true; continue; }\n    if (l === 'END:VALARM') { dinsAlarma = false; continue; }\n    if (dinsAlarma) continue;\n    const nom = l.split(/[;:]/)[0].toUpperCase();\n    const valor = l.slice(l.indexOf(':') + 1);\n    if (nom === 'SUMMARY') ev.titol = desescapa(valor);\n    else if (nom === 'DESCRIPTION') ev.descripcio = desescapa(valor);\n    else if (nom === 'UID') ev.uid = valor;\n    else if (nom === 'DTSTART') { ev.iniciTs = icsDataAUtc(l); ev.inici = ev.iniciTs != null ? horaMadrid(ev.iniciTs) : valor; }\n    else if (nom === 'DTEND') { ev.fiTs = icsDataAUtc(l); ev.fi = ev.fiTs != null ? horaMadrid(ev.fiTs) : valor; }\n  }\n  return evs;\n}\nconst escapaIcs = (s) => String(s || '').replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nfunction plega(linia) {\n  // RFC 5545: línies de 75 octets com a màxim\n  const bytes = Buffer.from(linia, 'utf8');\n  if (bytes.length <= 75) return linia;\n  const trossos = [];\n  let actual = '';\n  let mida = 0;\n  for (const ch of linia) {\n    const b = Buffer.byteLength(ch, 'utf8');\n    const max = trossos.length ? 74 : 75;\n    if (mida + b > max) { trossos.push(actual); actual = ''; mida = 0; }\n    actual += ch; mida += b;\n  }\n  trossos.push(actual);\n  return trossos.join('\\r\\n ');\n}\n// ── Fi CalDAV ──\n\nconst c = $('Entrada i config').first().json;\nconst d = c.dades || {};\nconst home = $('Troba carpeta calendaris').first().json.home;\nconst xml = xmlRespostaCalDav($input.first().json, 'llistar calendaris');\nconst calendaris = respostes(xml)\n  .filter((r) => /<(?:[\\w-]+:)?calendar[\\s/>]/i.test(etiquetes(r, 'resourcetype')[0] || ''))\n  .map((r) => ({ nom: desXml((etiquetes(r, 'displayname')[0] || '').trim()), url: absoluta(hrefDe(r), home) }));\nconst nomCal = d.calendari || c.calendariPerDefecte;\nconst cal = calendaris.find((x) => normalitza(x.nom) === normalitza(nomCal));\nif (!cal) throw new Error(`No trobo el calendari «${nomCal}». N'hi ha: ${calendaris.map((x) => x.nom).join(', ')}.`);\n\nlet desDe; let finsA; let esdeveniments = [];\nif (c.accio === 'crear') {\n  esdeveniments = (d.esdeveniments || []).map((e, i) => {\n    if (!e.titol || !e.inici) throw new Error(`L'esdeveniment ${i + 1} no té «titol» o «inici».`);\n    const ini = localAUtc(e.inici);\n    const durada = Number(e.durada_min ?? e.duradaMin ?? 10);\n    return { titol: String(e.titol), descripcio: e.descripcio ? String(e.descripcio) : '', iniciTs: ini, fiTs: ini + durada * 60000, alarma: e.alarma !== false, inici: horaMadrid(ini) };\n  });\n  if (!esdeveniments.length) throw new Error('Falta «esdeveniments».');\n  if (esdeveniments.length > 30) throw new Error('Massa esdeveniments d\\'una vegada (màxim 30).');\n  desDe = Math.min(...esdeveniments.map((e) => e.iniciTs)) - 86400000;\n  finsA = Math.max(...esdeveniments.map((e) => e.fiTs)) + 86400000;\n} else if (c.accio === 'llistar' || c.accio === 'prova') {\n  desDe = localAUtc(d.des_de || avuiMadrid());\n  finsA = d.fins_a ? localAUtc(d.fins_a) : desDe + 7 * 86400000;\n} else {\n  throw new Error(`Acció desconeguda: «${c.accio}». Vàlides: llistar, crear.`);\n}\nconst cos = '<?xml version=\"1.0\" encoding=\"utf-8\"?>'\n  + '<c:calendar-query xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">'\n  + '<d:prop><d:getetag/><c:calendar-data/></d:prop>'\n  + '<c:filter><c:comp-filter name=\"VCALENDAR\"><c:comp-filter name=\"VEVENT\">'\n  + `<c:time-range start=\"${utcIcs(desDe)}\" end=\"${utcIcs(finsA)}\"/>`\n  + '</c:comp-filter></c:comp-filter></c:filter></c:calendar-query>';\nreturn [{ json: { calendari: cal.nom, url: cal.url, cos, esdeveniments } }];\n"
+      },
+      "id": "4b425376-220d-4b3f-af92-0d1baa617236",
+      "name": "Tria calendari i prepara",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ \"REPORT\" }}",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Depth",
+              "value": "1"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/xml; charset=utf-8",
+        "body": "={{ $json.cos }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "5d51d5b9-c0bb-4f9d-a814-900d4101f580",
+      "name": "Llegeix esdeveniments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        100
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "",
+          "name": "iCloud (calendari)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines de CalDAV / iCalendar ──\nconst ZONA = 'Europe/Madrid';\nconst desXml = (s) => String(s)\n  .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1')\n  .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(+n))\n  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&amp;/g, '&');\nconst etiquetes = (xml, nom) => [...String(xml).matchAll(new RegExp(`<(?:[\\\\w-]+:)?${nom}(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</(?:[\\\\w-]+:)?${nom}>`, 'gi'))].map((m) => m[1]);\nconst respostes = (xml) => etiquetes(xml, 'response');\nconst hrefDe = (frag) => { const h = etiquetes(frag, 'href')[0]; return h ? desXml(h).trim() : null; };\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim().toLowerCase();\nconst xmlRespostaCalDav = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('iCloud ha rebutjat l\\'usuari o la contrasenya d\\'aplicació de la credencial «iCloud (calendari)».');\n  if (!st || st >= 400) throw new Error(`iCloud (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  return comATexte(cosResposta(r));\n};\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst utcIcs = (ts) => new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}/, '');\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nfunction icsDataAUtc(linia) {\n  // linia: \"DTSTART;TZID=Europe/Madrid:20261109T201500\" o \"DTSTART:20261109T191500Z\" o \"DTSTART;VALUE=DATE:20261109\"\n  const i = linia.indexOf(':');\n  const params = linia.slice(0, i);\n  const v = linia.slice(i + 1).trim();\n  const tz = (params.match(/TZID=([^;:]+)/i) || [])[1];\n  const m = v.match(/^(\\d{4})(\\d{2})(\\d{2})(?:T(\\d{2})(\\d{2})(\\d{2})(Z)?)?$/);\n  if (!m) return null;\n  const txt = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}`;\n  if (m[7] === 'Z') return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);\n  try { return localAUtc(txt, tz || ZONA); } catch (e) { return localAUtc(txt, ZONA); }\n}\nfunction llegeixEsdeveniments(ics) {\n  const linies = String(ics).replace(/\\r?\\n[ \\t]/g, '').split(/\\r?\\n/);\n  const evs = [];\n  let ev = null; let alarmes = 0; let dinsAlarma = false;\n  const desescapa = (s) => s.replace(/\\\\n/gi, '\\n').replace(/\\\\([,;\\\\])/g, '$1');\n  for (const l of linies) {\n    if (l === 'BEGIN:VEVENT') { ev = {}; alarmes = 0; continue; }\n    if (l === 'END:VEVENT') { if (ev) { ev.alarmes = alarmes; evs.push(ev); } ev = null; continue; }\n    if (!ev) continue;\n    if (l === 'BEGIN:VALARM') { alarmes++; dinsAlarma = true; continue; }\n    if (l === 'END:VALARM') { dinsAlarma = false; continue; }\n    if (dinsAlarma) continue;\n    const nom = l.split(/[;:]/)[0].toUpperCase();\n    const valor = l.slice(l.indexOf(':') + 1);\n    if (nom === 'SUMMARY') ev.titol = desescapa(valor);\n    else if (nom === 'DESCRIPTION') ev.descripcio = desescapa(valor);\n    else if (nom === 'UID') ev.uid = valor;\n    else if (nom === 'DTSTART') { ev.iniciTs = icsDataAUtc(l); ev.inici = ev.iniciTs != null ? horaMadrid(ev.iniciTs) : valor; }\n    else if (nom === 'DTEND') { ev.fiTs = icsDataAUtc(l); ev.fi = ev.fiTs != null ? horaMadrid(ev.fiTs) : valor; }\n  }\n  return evs;\n}\nconst escapaIcs = (s) => String(s || '').replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nfunction plega(linia) {\n  // RFC 5545: línies de 75 octets com a màxim\n  const bytes = Buffer.from(linia, 'utf8');\n  if (bytes.length <= 75) return linia;\n  const trossos = [];\n  let actual = '';\n  let mida = 0;\n  for (const ch of linia) {\n    const b = Buffer.byteLength(ch, 'utf8');\n    const max = trossos.length ? 74 : 75;\n    if (mida + b > max) { trossos.push(actual); actual = ''; mida = 0; }\n    actual += ch; mida += b;\n  }\n  trossos.push(actual);\n  return trossos.join('\\r\\n ');\n}\n// ── Fi CalDAV ──\n\nconst c = $('Entrada i config').first().json;\nconst prep = $('Tria calendari i prepara').first().json;\nconst xml = xmlRespostaCalDav($input.first().json, 'llegir esdeveniments');\nconst existents = respostes(xml).flatMap((r) => etiquetes(r, 'calendar-data').map((x) => llegeixEsdeveniments(desXml(x))).flat());\nconst capcalSkip = { Depth: '0', 'Content-Type': 'application/xml; charset=utf-8' };\nconst cosSkip = '<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:displayname/></d:prop></d:propfind>';\nif (c.accio !== 'crear') {\n  return [{ json: { skip: true, metode: 'PROPFIND', url: prep.url, capcaleres: capcalSkip, cos: cosSkip, existents } }];\n}\nconst ara = utcIcs(Date.now());\nconst items = [];\nconst repetits = [];\nfor (const e of prep.esdeveniments) {\n  const dup = existents.find((x) => normalitza(x.titol) === normalitza(e.titol) && x.iniciTs === e.iniciTs);\n  if (dup) { repetits.push({ titol: e.titol, inici: e.inici }); continue; }\n  const uid = 'cuina-' + e.iniciTs.toString(36) + '-' + Math.random().toString(36).slice(2, 10);\n  const linies = [\n    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//cuina-n8n//CA', 'CALSCALE:GREGORIAN',\n    'BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${ara}`, `DTSTART:${utcIcs(e.iniciTs)}`, `DTEND:${utcIcs(e.fiTs)}`,\n    `SUMMARY:${escapaIcs(e.titol)}`,\n    ...(e.descripcio ? [`DESCRIPTION:${escapaIcs(e.descripcio)}`] : []),\n    ...(e.alarma ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${escapaIcs(e.titol)}`, 'TRIGGER:PT0S', 'END:VALARM'] : []),\n    'END:VEVENT', 'END:VCALENDAR',\n  ];\n  items.push({ json: {\n    skip: false, metode: 'PUT', url: prep.url.replace(/\\/?$/, '/') + uid + '.ics',\n    capcaleres: { 'Content-Type': 'text/calendar; charset=utf-8', 'If-None-Match': '*' },\n    cos: linies.map(plega).join('\\r\\n') + '\\r\\n',\n    titol: e.titol, inici: e.inici, alarma: e.alarma, repetits,\n  } });\n}\nif (!items.length) return [{ json: { skip: true, metode: 'PROPFIND', url: prep.url, capcaleres: capcalSkip, cos: cosSkip, repetits } }];\nreturn items;\n"
+      },
+      "id": "09cb0695-964f-476a-a749-e9dd5f8d0464",
+      "name": "Decideix què cal crear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.metode }}",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.capcaleres) }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "={{ $json.capcaleres['Content-Type'] }}",
+        "body": "={{ $json.cos }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "629b2090-448f-4f29-aade-0e255005fff1",
+      "name": "Crea esdeveniments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2220,
+        100
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "",
+          "name": "iCloud (calendari)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── Eines de CalDAV / iCalendar ──\nconst ZONA = 'Europe/Madrid';\nconst desXml = (s) => String(s)\n  .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1')\n  .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(+n))\n  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&amp;/g, '&');\nconst etiquetes = (xml, nom) => [...String(xml).matchAll(new RegExp(`<(?:[\\\\w-]+:)?${nom}(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</(?:[\\\\w-]+:)?${nom}>`, 'gi'))].map((m) => m[1]);\nconst respostes = (xml) => etiquetes(xml, 'response');\nconst hrefDe = (frag) => { const h = etiquetes(frag, 'href')[0]; return h ? desXml(h).trim() : null; };\nconst normalitza = (s) => String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim().toLowerCase();\nconst xmlRespostaCalDav = (r, que) => {\n  const st = r && r.statusCode;\n  if (st === 401) throw new Error('iCloud ha rebutjat l\\'usuari o la contrasenya d\\'aplicació de la credencial «iCloud (calendari)».');\n  if (!st || st >= 400) throw new Error(`iCloud (${que}): HTTP ${st}: ${comATexte(cosResposta(r)).slice(0, 300)}`);\n  return comATexte(cosResposta(r));\n};\nfunction desplacament(ts, zona) {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {\n    timeZone: zona, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n  }).formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ts;\n}\nfunction localAUtc(text, zona = ZONA) {\n  const m = String(text).trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!m) throw new Error(`Data/hora no vàlida: «${text}» (format AAAA-MM-DDTHH:MM, hora de Madrid).`);\n  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));\n  let ts = base - desplacament(base, zona);\n  ts = base - desplacament(ts, zona);\n  return ts;\n}\nconst utcIcs = (ts) => new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}/, '');\nconst horaMadrid = (ts) => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })\n    .formatToParts(new Date(ts)).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;\n};\nfunction icsDataAUtc(linia) {\n  // linia: \"DTSTART;TZID=Europe/Madrid:20261109T201500\" o \"DTSTART:20261109T191500Z\" o \"DTSTART;VALUE=DATE:20261109\"\n  const i = linia.indexOf(':');\n  const params = linia.slice(0, i);\n  const v = linia.slice(i + 1).trim();\n  const tz = (params.match(/TZID=([^;:]+)/i) || [])[1];\n  const m = v.match(/^(\\d{4})(\\d{2})(\\d{2})(?:T(\\d{2})(\\d{2})(\\d{2})(Z)?)?$/);\n  if (!m) return null;\n  const txt = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}`;\n  if (m[7] === 'Z') return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);\n  try { return localAUtc(txt, tz || ZONA); } catch (e) { return localAUtc(txt, ZONA); }\n}\nfunction llegeixEsdeveniments(ics) {\n  const linies = String(ics).replace(/\\r?\\n[ \\t]/g, '').split(/\\r?\\n/);\n  const evs = [];\n  let ev = null; let alarmes = 0; let dinsAlarma = false;\n  const desescapa = (s) => s.replace(/\\\\n/gi, '\\n').replace(/\\\\([,;\\\\])/g, '$1');\n  for (const l of linies) {\n    if (l === 'BEGIN:VEVENT') { ev = {}; alarmes = 0; continue; }\n    if (l === 'END:VEVENT') { if (ev) { ev.alarmes = alarmes; evs.push(ev); } ev = null; continue; }\n    if (!ev) continue;\n    if (l === 'BEGIN:VALARM') { alarmes++; dinsAlarma = true; continue; }\n    if (l === 'END:VALARM') { dinsAlarma = false; continue; }\n    if (dinsAlarma) continue;\n    const nom = l.split(/[;:]/)[0].toUpperCase();\n    const valor = l.slice(l.indexOf(':') + 1);\n    if (nom === 'SUMMARY') ev.titol = desescapa(valor);\n    else if (nom === 'DESCRIPTION') ev.descripcio = desescapa(valor);\n    else if (nom === 'UID') ev.uid = valor;\n    else if (nom === 'DTSTART') { ev.iniciTs = icsDataAUtc(l); ev.inici = ev.iniciTs != null ? horaMadrid(ev.iniciTs) : valor; }\n    else if (nom === 'DTEND') { ev.fiTs = icsDataAUtc(l); ev.fi = ev.fiTs != null ? horaMadrid(ev.fiTs) : valor; }\n  }\n  return evs;\n}\nconst escapaIcs = (s) => String(s || '').replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nfunction plega(linia) {\n  // RFC 5545: línies de 75 octets com a màxim\n  const bytes = Buffer.from(linia, 'utf8');\n  if (bytes.length <= 75) return linia;\n  const trossos = [];\n  let actual = '';\n  let mida = 0;\n  for (const ch of linia) {\n    const b = Buffer.byteLength(ch, 'utf8');\n    const max = trossos.length ? 74 : 75;\n    if (mida + b > max) { trossos.push(actual); actual = ''; mida = 0; }\n    actual += ch; mida += b;\n  }\n  trossos.push(actual);\n  return trossos.join('\\r\\n ');\n}\n// ── Fi CalDAV ──\n\nconst c = $('Entrada i config').first().json;\nconst prep = $('Tria calendari i prepara').first().json;\nconst dec = $('Decideix què cal crear').all().map((x) => x.json);\nconst resp = $input.all().map((x) => x.json);\nif (c.accio !== 'crear') {\n  const existents = (dec[0].existents || []).map((e) => ({ titol: e.titol, inici: e.inici, fi: e.fi, alarmes: e.alarmes, ...(e.descripcio ? { descripcio: e.descripcio } : {}) }))\n    .sort((a, b) => String(a.inici).localeCompare(String(b.inici)));\n  return [{ json: { ok: true, accio: c.accio, calendari: prep.calendari, esdeveniments: existents } }];\n}\nconst creats = [];\nconst errors = [];\ndec.forEach((d, i) => {\n  if (d.skip) return;\n  const st = resp[i] && resp[i].statusCode;\n  if (st >= 200 && st < 300) creats.push({ titol: d.titol, inici: d.inici, alarma: d.alarma });\n  else errors.push({ titol: d.titol, inici: d.inici, error: `HTTP ${st}: ${comATexte(cosResposta(resp[i])).slice(0, 200)}` });\n});\nconst repetits = (dec[0] && dec[0].repetits) || [];\nreturn [{ json: { ok: errors.length === 0, accio: 'crear', calendari: prep.calendari, creats, repetits, errors } }];\n"
+      },
+      "id": "90fa08a2-479d-4bde-a2ce-70f94ba408cf",
+      "name": "Resultat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Calendari d'iCloud\nLlegeix i crea avisos als calendaris d'iCloud («Personal», «Família»…), amb alarma a l'hora exacta. No en crea de repetits.\n\n**Credencial:** «iCloud (calendari)», tipus *Basic Auth*:\nUser = el teu Apple ID · Password = una **contrasenya d'aplicació** (appleid.apple.com → Inici de sessió i seguretat).\n\n**Prova:** botó «Execute workflow». Només llegeix els avisos dels 7 dies vinents del calendari «Personal».",
+        "width": 560,
+        "height": 300
+      },
+      "id": "821257ee-0b86-4879-a610-ada2c17b3e44",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -380
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Quan el crida Claude": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova manual": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada i config": {
+      "main": [
+        [
+          {
+            "node": "Busca usuari",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca usuari": {
+      "main": [
+        [
+          {
+            "node": "Troba usuari",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Troba usuari": {
+      "main": [
+        [
+          {
+            "node": "Busca carpeta calendaris",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca carpeta calendaris": {
+      "main": [
+        [
+          {
+            "node": "Troba carpeta calendaris",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Troba carpeta calendaris": {
+      "main": [
+        [
+          {
+            "node": "Llista calendaris",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llista calendaris": {
+      "main": [
+        [
+          {
+            "node": "Tria calendari i prepara",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tria calendari i prepara": {
+      "main": [
+        [
+          {
+            "node": "Llegeix esdeveniments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llegeix esdeveniments": {
+      "main": [
+        [
+          {
+            "node": "Decideix què cal crear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decideix què cal crear": {
+      "main": [
+        [
+          {
+            "node": "Crea esdeveniments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crea esdeveniments": {
+      "main": [
+        [
+          {
+            "node": "Resultat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Europe/Madrid"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

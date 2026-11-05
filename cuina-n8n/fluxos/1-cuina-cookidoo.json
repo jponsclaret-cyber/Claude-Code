@@ -1,0 +1,327 @@
+{
+  "name": "Cuina · Cookidoo",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "accio"
+            },
+            {
+              "name": "dades"
+            }
+          ]
+        }
+      },
+      "id": "074b1531-037e-4a86-a02b-97786e6c0b8c",
+      "name": "Quan el crida Claude",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "bfa4dd15-da84-4eb2-ace0-425fca694998",
+      "name": "Prova manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ⚙️ CONFIGURACIÓ DEL COOKIDOO\n// Aquí no hi ha cap contrasenya: l'usuari i la contrasenya són a la credencial\n// «Cookidoo (usuari i contrasenya)» del node «Envia usuari i contrasenya».\nconst CONFIG = {\n  base: 'https://cookidoo.es',\n  idioma: 'es-ES',\n  mercat: 'es',\n  ciam: 'https://ciam.prod.cookidoo.vorwerk-digital.com',\n  clientId: 'mobile-android', // identificador públic de l'app de Cookidoo (no és cap secret)\n  redirectUri: 'com.vorwerk.cookidoo://code-grant',\n  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',\n};\n\nconst ent = $input.first().json;\nlet accio = String(ent.accio || '').trim();\nlet dades = llegeixDades(ent.dades);\n// Si l'executes a mà (botó «Execute workflow»), fa una prova només de lectura.\nif (!accio) { accio = 'prova'; dades = {}; }\nreturn [{ json: { ...CONFIG, accio, dades } }];\n"
+      },
+      "id": "82222a49-eefe-42bd-a5ff-8dcc33c03c67",
+      "name": "Entrada i config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Si ja tenim un token del Cookidoo vàlid (dura 12 h), no cal tornar a entrar.\nconst c = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nconst ara = Date.now();\nconst ok = !!(sd.cookidoo && sd.cookidoo.token && sd.cookidoo.caduca > ara + 15 * 60 * 1000);\nreturn [{ json: { calLogin: !ok, token: ok ? sd.cookidoo.token : '' } }];\n"
+      },
+      "id": "9fa84d86-9842-41d2-abc4-833316895e7a",
+      "name": "Token guardat?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5d40393c-a4f0-4297-a59c-55d137a85f84",
+              "leftValue": "={{ $json.calLogin }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "52175c7c-ca97-4262-a9cb-087b09be01c9",
+      "name": "Cal login?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// ── PKCE (SHA-256 en JavaScript pur, per si el mòdul crypto no està permès) ──\nlet nodeCrypto = null;\ntry { nodeCrypto = require('crypto'); } catch (e) { nodeCrypto = null; }\nconst aleatori = (n) => {\n  if (nodeCrypto) return nodeCrypto.randomBytes(n);\n  const a = new Uint8Array(n);\n  for (let i = 0; i < n; i++) a[i] = Math.floor(Math.random() * 256);\n  return a;\n};\nconst b64url = (bytes) => Buffer.from(bytes).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');\nfunction sha256js(text) {\n  const bytes = new TextEncoder().encode(text);\n  const K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];\n  const h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];\n  const len = bytes.length;\n  const total = ((len + 9 + 63) >> 6) << 6;\n  const m = new Uint8Array(total);\n  m.set(bytes);\n  m[len] = 0x80;\n  const bits = len * 8;\n  const hi = Math.floor(bits / 0x100000000);\n  const lo = bits >>> 0;\n  m[total - 8] = (hi >>> 24) & 255; m[total - 7] = (hi >>> 16) & 255; m[total - 6] = (hi >>> 8) & 255; m[total - 5] = hi & 255;\n  m[total - 4] = (lo >>> 24) & 255; m[total - 3] = (lo >>> 16) & 255; m[total - 2] = (lo >>> 8) & 255; m[total - 1] = lo & 255;\n  const w = new Array(64);\n  const rot = (x, n) => (x >>> n) | (x << (32 - n));\n  for (let off = 0; off < total; off += 64) {\n    for (let i = 0; i < 16; i++) w[i] = ((m[off + i * 4] << 24) | (m[off + i * 4 + 1] << 16) | (m[off + i * 4 + 2] << 8) | m[off + i * 4 + 3]) >>> 0;\n    for (let i = 16; i < 64; i++) {\n      const s0 = rot(w[i - 15], 7) ^ rot(w[i - 15], 18) ^ (w[i - 15] >>> 3);\n      const s1 = rot(w[i - 2], 17) ^ rot(w[i - 2], 19) ^ (w[i - 2] >>> 10);\n      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;\n    }\n    let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7];\n    for (let i = 0; i < 64; i++) {\n      const S1 = rot(e, 6) ^ rot(e, 11) ^ rot(e, 25);\n      const ch = (e & f) ^ (~e & g);\n      const t1 = (k + S1 + ch + K[i] + w[i]) >>> 0;\n      const S0 = rot(a, 2) ^ rot(a, 13) ^ rot(a, 22);\n      const maj = (a & b) ^ (a & c) ^ (b & c);\n      const t2 = (S0 + maj) >>> 0;\n      k = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;\n    }\n    h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0; h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;\n    h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0; h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + k) >>> 0;\n  }\n  const out = new Uint8Array(32);\n  for (let i = 0; i < 8; i++) { out[i * 4] = h[i] >>> 24; out[i * 4 + 1] = (h[i] >>> 16) & 255; out[i * 4 + 2] = (h[i] >>> 8) & 255; out[i * 4 + 3] = h[i] & 255; }\n  return out;\n}\nconst sha256 = (text) => (nodeCrypto ? nodeCrypto.createHash('sha256').update(text).digest() : sha256js(text));\n// ── Fi PKCE ──\n\n// Login al Cookidoo, pas 1: obre la pàgina de login (OAuth2 + PKCE) i en treu el requestId.\n// La contrasenya NO passa per aquí: l'envia el node següent des de la credencial.\nconst c = $('Entrada i config').first().json;\nconst UA = c.userAgent;\nconst jar = {};\nconst guardaGaletes = (hdr) => {\n  let sc = hdr && (hdr['set-cookie'] || hdr['Set-Cookie']);\n  if (!sc) return;\n  if (!Array.isArray(sc)) sc = [sc];\n  for (const s of sc) {\n    const kv = String(s).split(';')[0];\n    const i = kv.indexOf('=');\n    if (i > 0) jar[kv.slice(0, i).trim()] = kv.slice(i + 1).trim();\n  }\n};\nconst galetes = () => Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');\n\nconst verifier = b64url(aleatori(48));\nconst challenge = b64url(sha256(verifier));\nconst estat = b64url(aleatori(12));\n\nconst disc = comAJson((await H.httpRequest({\n  method: 'GET',\n  url: c.ciam + '/.well-known/openid-configuration',\n  headers: { 'User-Agent': UA, Accept: 'application/json' },\n  returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n})).body);\nif (!disc || !disc.authorization_endpoint || !disc.token_endpoint) {\n  throw new Error('Cookidoo: no he pogut llegir la configuració de login (pot ser un bloqueig de Cloudflare des de n8n).');\n}\n\nconst params = {\n  response_type: 'code', client_id: c.clientId, redirect_uri: c.redirectUri, market: c.mercat,\n  scope: 'openid profile email offline offline_access', state: estat,\n  code_challenge: challenge, code_challenge_method: 'S256', ui_locales: c.idioma,\n};\nlet url = disc.authorization_endpoint + (disc.authorization_endpoint.includes('?') ? '&' : '?') + qs(params);\nlet html = null;\nfor (let i = 0; i < 15; i++) {\n  const r = await H.httpRequest({\n    method: 'GET', url,\n    headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml', Cookie: galetes() },\n    returnFullResponse: true, ignoreHttpStatusErrors: true, disableFollowRedirect: true, encoding: 'text',\n  });\n  guardaGaletes(r.headers);\n  const loc = r.headers && r.headers.location;\n  if (r.statusCode >= 300 && r.statusCode < 400 && loc) { url = absoluta(loc, url); continue; }\n  if (r.statusCode !== 200) {\n    throw new Error(`Cookidoo: la pàgina de login ha respost HTTP ${r.statusCode}. Si és 403, Cloudflare bloqueja n8n.`);\n  }\n  html = comATexte(r.body);\n  break;\n}\nif (!html) throw new Error('Cookidoo: massa redireccions abans de la pàgina de login.');\nconst m = html.match(/<input[^>]*name=[\"']requestId[\"'][^>]*value=[\"']([^\"']+)[\"']/i)\n  || html.match(/<input[^>]*value=[\"']([0-9a-f-]{36})[\"'][^>]*name=[\"']requestId[\"']/i);\nif (!m) throw new Error('Cookidoo: no trobo el requestId a la pàgina de login (el login pot haver canviat).');\n\nreturn [{ json: {\n  loginUrl: c.ciam + '/login-srv/login',\n  requestId: m[1],\n  galetes: galetes(),\n  jar, verifier, estat,\n  tokenEndpoint: disc.token_endpoint,\n  userAgent: UA,\n} }];\n"
+      },
+      "id": "6733dc82-de0d-4178-ac4c-bc908370155c",
+      "name": "Inicia login",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.loginUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            },
+            {
+              "name": "User-Agent",
+              "value": "={{ $json.userAgent }}"
+            },
+            {
+              "name": "Cookie",
+              "value": "={{ $json.galetes }}"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "requestId",
+              "value": "={{ $json.requestId }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "id": "5411c289-d0b2-4958-a542-fc9bd8b4388f",
+      "name": "Envia usuari i contrasenya",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        0
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "",
+          "name": "Cookidoo (usuari i contrasenya)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// Login al Cookidoo, pas 3: segueix les redireccions fins al codi i el canvia pel token.\nconst c = $('Entrada i config').first().json;\nconst ini = $('Inicia login').first().json;\nconst r = $input.first().json; // resposta del node «Envia usuari i contrasenya»\nconst jar = { ...(ini.jar || {}) };\nconst guardaGaletes = (hdr) => {\n  let sc = hdr && (hdr['set-cookie'] || hdr['Set-Cookie']);\n  if (!sc) return;\n  if (!Array.isArray(sc)) sc = [sc];\n  for (const s of sc) {\n    const kv = String(s).split(';')[0];\n    const i = kv.indexOf('=');\n    if (i > 0) jar[kv.slice(0, i).trim()] = kv.slice(i + 1).trim();\n  }\n};\nconst galetes = () => Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');\nguardaGaletes(r.headers);\n\nlet estatHttp = r.statusCode;\nlet loc = r.headers && (r.headers.location || r.headers.Location);\nlet url = ini.loginUrl;\nlet codi = null;\nfor (let i = 0; i < 15 && loc; i++) {\n  if (loc.startsWith(c.redirectUri)) {\n    const q = llegeixQuery(loc);\n    if (q.state !== ini.estat) throw new Error('Cookidoo: el «state» del login no coincideix. Torna-ho a provar.');\n    codi = q.code || null;\n    break;\n  }\n  url = absoluta(loc, url);\n  if (!url.startsWith(c.ciam)) throw new Error('Cookidoo: el login redirigeix fora del servidor de login: ' + url.split('?')[0]);\n  const rr = await H.httpRequest({\n    method: 'GET', url,\n    headers: { 'User-Agent': ini.userAgent, Accept: 'text/html', Cookie: galetes() },\n    returnFullResponse: true, ignoreHttpStatusErrors: true, disableFollowRedirect: true, encoding: 'text',\n  });\n  guardaGaletes(rr.headers);\n  estatHttp = rr.statusCode;\n  loc = rr.headers && rr.headers.location;\n}\nif (!codi) {\n  throw new Error(`Cookidoo: login rebutjat (HTTP ${estatHttp}). Revisa l'usuari i la contrasenya de la credencial «Cookidoo (usuari i contrasenya)».`);\n}\n\nconst tok = await H.httpRequest({\n  method: 'POST', url: ini.tokenEndpoint,\n  headers: { 'User-Agent': ini.userAgent, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },\n  body: qs({ grant_type: 'authorization_code', code: codi, redirect_uri: c.redirectUri, code_verifier: ini.verifier, client_id: c.clientId }),\n  returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n});\nconst t = comAJson(tok.body);\nif (tok.statusCode !== 200 || !t || !t.access_token) {\n  throw new Error(`Cookidoo: no he pogut obtenir el token (HTTP ${tok.statusCode}).`);\n}\nconst sd = $getWorkflowStaticData('global');\nsd.cookidoo = { token: t.access_token, caduca: Date.now() + (Number(t.expires_in) || 43200) * 1000 };\nreturn [{ json: { token: t.access_token } }];\n"
+      },
+      "id": "14a2bdd8-7534-4005-a65f-f202bed2141f",
+      "name": "Acaba login",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Eines comunes (no cal tocar res d'aquí) ──\nconst H = (typeof helpers !== 'undefined' && helpers && helpers.httpRequest) ? helpers : this.helpers;\nconst qs = (o) => Object.entries(o || {})\n  .filter(([, v]) => v !== undefined && v !== null && v !== '')\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\nconst absoluta = (loc, base) => {\n  if (/^[a-z][a-z0-9+.-]*:/i.test(loc)) return loc;\n  const m = String(base).match(/^([a-z]+:\\/\\/[^/?#]+)([^?#]*)/i);\n  if (!m) return loc;\n  if (loc.startsWith('//')) return base.split(':')[0] + ':' + loc;\n  if (loc.startsWith('/')) return m[1] + loc;\n  const dir = (m[2] || '/').replace(/[^/]*$/, '');\n  return m[1] + dir + loc;\n};\nconst llegeixQuery = (u) => {\n  const out = {};\n  const i = String(u).indexOf('?');\n  if (i < 0) return out;\n  for (const part of String(u).slice(i + 1).split('#')[0].split('&')) {\n    if (!part) continue;\n    const j = part.indexOf('=');\n    const k = decodeURIComponent((j < 0 ? part : part.slice(0, j)).replace(/\\+/g, ' '));\n    out[k] = j < 0 ? '' : decodeURIComponent(part.slice(j + 1).replace(/\\+/g, ' '));\n  }\n  return out;\n};\nconst comATexte = (b) => (typeof b === 'string' ? b : b == null ? '' : Buffer.isBuffer(b) ? b.toString('utf8') : JSON.stringify(b));\n// Cos d'una resposta del node HTTP (amb «text», n8n el posa a «data»)\nconst cosResposta = (r) => (r == null ? r : r.body !== undefined ? r.body : r.data);\nconst comAJson = (b) => {\n  if (b && typeof b === 'object' && !Buffer.isBuffer(b)) return b;\n  const t = comATexte(b).trim();\n  if (!t) return null;\n  try { return JSON.parse(t); } catch (e) { return t; }\n};\nconst llegeixDades = (d) => {\n  if (d === undefined || d === null || d === '') return {};\n  if (typeof d === 'object') return d;\n  try { return JSON.parse(String(d)); } catch (e) {\n    throw new Error('El camp «dades» no és un JSON vàlid: ' + String(d).slice(0, 200));\n  }\n};\nconst avuiMadrid = () => {\n  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })\n    .formatToParts(new Date()).map((x) => [x.type, x.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n};\nconst sumaDies = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);\n// ── Fi de les eines comunes ──\n\n// Executa l'acció demanada contra el Cookidoo amb el token (no surt mai a la resposta).\nconst c = $('Entrada i config').first().json;\nconst token = $input.first().json.token;\nconst { accio } = c;\nconst dades = c.dades || {};\nconst B = c.base.replace(/\\/$/, '');\nconst L = c.idioma;\nconst sd = $getWorkflowStaticData('global');\nconst LLEGUM = /lentej|garbanz|alubi|jud[ií]a|frijol|guisante|soja|soya|tofu|tempeh|edamame|cacahuet|\\bman[ií]\\b|\\bhaba|altramuz|azuki|hummus|\\bmiso\\b|tirabeque|garrof|fagiol|pisell/i;\nconst LLEGUM_EXTRA = /man[ií](?![a-záéíóúñ])/i; // «maní» amb accent, que el \\b no detecta\n\nasync function api(method, path, { body, accept, query } = {}) {\n  const url = `${B}/${path}` + (query ? `?${qs(query)}` : '');\n  const r = await H.httpRequest({\n    method, url,\n    headers: {\n      Authorization: 'Bearer ' + token,\n      Accept: accept || 'application/json',\n      'Accept-Language': L,\n      'User-Agent': c.userAgent,\n      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),\n    },\n    body: body !== undefined ? JSON.stringify(body) : undefined,\n    returnFullResponse: true, ignoreHttpStatusErrors: true, encoding: 'text',\n  });\n  if (r.statusCode === 401) {\n    delete sd.cookidoo;\n    throw new Error('El Cookidoo ha rebutjat el token. L\\'he esborrat: torna-ho a provar i farà login de nou.');\n  }\n  if (r.statusCode >= 400) throw new Error(`${method} ${path} → HTTP ${r.statusCode}: ${comATexte(r.body).slice(0, 300)}`);\n  return comAJson(r.body);\n}\n\nconst quantitat = (q) => {\n  if (!q) return '';\n  if (q.value != null) return String(q.value);\n  if (q.from != null && q.to != null) return `${q.from}-${q.to}`;\n  return q.from != null ? String(q.from) : '';\n};\nconst ingredientText = (x) => [quantitat(x.quantity), x.unitNotation || '', x.ingredientNotation || '']\n  .filter(Boolean).join(' ').trim() + (x.preparation ? `, ${x.preparation}` : '');\nconst minuts = (v) => (v == null ? null : v > 300 ? Math.round(v / 60) : v); // l'API dona segons\nconst decodeHtml = (s) => String(s).replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');\n\nasync function recepta(id, ambVariants) {\n  const out = { id };\n  try {\n    const j = await api('GET', `recipes/recipe/${L}/${id}`);\n    if (j && typeof j === 'object' && Array.isArray(j.recipeIngredientGroups)) {\n      out.titol = j.title;\n      if (j.servingSize) out.racions = `${quantitat(j.servingSize.quantity)} ${j.servingSize.unitNotation || ''}`.trim();\n      const tt = (j.times || []).find((t) => t.type === 'totalTime');\n      out.tempsTotalMin = tt && tt.quantity ? minuts(tt.quantity.value) : null;\n      out.ingredients = j.recipeIngredientGroups.flatMap((g) => (g.recipeIngredients || []).map(ingredientText));\n      out.colleccions = (j.inCollections || []).map((x) => x.title);\n    }\n  } catch (e) {\n    out.avis = 'API de recepta: ' + e.message;\n  }\n  if (!out.ingredients || ambVariants) {\n    try {\n      const html = comATexte(await api('GET', `recipes/recipe/${L}/${id}`, { accept: 'text/html' }));\n      if (!out.ingredients) {\n        for (const m of html.matchAll(/<script[^>]*application\\/ld\\+json[^>]*>([\\s\\S]*?)<\\/script>/gi)) {\n          try {\n            const ld = JSON.parse(m[1]);\n            const r = [].concat(ld['@graph'] || ld).find((x) => x && x['@type'] === 'Recipe');\n            if (r) {\n              out.titol = out.titol || r.name;\n              out.racions = out.racions || r.recipeYield;\n              out.tempsTotal = r.totalTime;\n              out.ingredients = r.recipeIngredient || [];\n              break;\n            }\n          } catch (e) { /* següent bloc */ }\n        }\n      }\n      if (ambVariants) {\n        const i = html.indexOf('rdp-serving-size__variants-section');\n        const tros = i >= 0 ? html.slice(i, i + 4000) : '';\n        const ids = [...tros.matchAll(/\\/recipes\\/recipe\\/[a-z]{2}-[A-Z]{2}\\/(r\\d+)/g)].map((m) => m[1]).filter((x) => x !== id);\n        out.variants = [...new Set(ids)];\n      }\n      if (!out.titol) {\n        const t = html.match(/<title>([^<]*)<\\/title>/i);\n        if (t) out.titol = decodeHtml(t[1]).trim();\n      }\n    } catch (e) {\n      out.avis = (out.avis ? out.avis + ' | ' : '') + 'Pàgina web: ' + e.message;\n    }\n  }\n  const text = (out.ingredients || []).join(' | ');\n  const trobats = (out.ingredients || []).filter((x) => LLEGUM.test(x) || LLEGUM_EXTRA.test(x));\n  out.llegum = trobats.length ? trobats : false;\n  if (!text) out.llegum = 'no ho sé: no he pogut llegir els ingredients';\n  return out;\n}\n\nasync function colleccions(tipus) {\n  const ruta = tipus === 'oficials' ? `organize/${L}/api/managed-list` : `organize/${L}/api/custom-list`;\n  const accept = tipus === 'oficials'\n    ? 'application/vnd.vorwerk.organize.managed-list.mobile+json'\n    : 'application/vnd.vorwerk.organize.custom-list.mobile+json';\n  const totes = [];\n  for (let p = 0; p < 30; p++) {\n    const r = await api('GET', ruta, { accept, query: { page: p } });\n    const llistes = (r && (r.customlists || r.managedlists || r.managedLists)) || [];\n    for (const l of llistes) {\n      totes.push({\n        id: l.id,\n        titol: l.title,\n        receptes: (l.chapters || []).flatMap((ch) => (ch.recipes || []).map((x) => ({ id: x.id, titol: x.title, tempsTotalMin: minuts(x.totalTime) }))),\n      });\n    }\n    const pages = r && r.page && r.page.totalPages;\n    if (!pages || p + 1 >= pages || !llistes.length) break;\n  }\n  return totes;\n}\n\nlet resultat;\ntry {\n  switch (accio) {\n    case 'prova': {\n      const d = avuiMadrid();\n      const r = await api('GET', `planning/${L}/api/my-week/${d}`);\n      resultat = { missatge: 'Login i lectura de «Mi semana» correctes.', dies: ((r && r.myDays) || []).map((x) => ({ dia: x.dayKey, receptes: (x.recipes || []).length })) };\n      break;\n    }\n    case 'setmana_llegir': {\n      const d0 = dades.data || avuiMadrid();\n      const fi = sumaDies(d0, Number(dades.dies) || 7);\n      const dies = {};\n      for (const d of [d0, sumaDies(d0, 4)]) {\n        const r = await api('GET', `planning/${L}/api/my-week/${d}`);\n        for (const x of (r && r.myDays) || []) {\n          if (x.dayKey < d0 || x.dayKey >= fi) continue;\n          dies[x.dayKey] = {\n            dia: x.dayKey,\n            receptes: (x.recipes || []).map((y) => ({ id: y.id, titol: y.title })),\n            ...(x.customerRecipeIds && x.customerRecipeIds.length ? { receptesPropies: x.customerRecipeIds } : {}),\n          };\n        }\n      }\n      resultat = Object.values(dies).sort((a, b) => a.dia.localeCompare(b.dia));\n      break;\n    }\n    case 'setmana_afegir': {\n      const fets = [];\n      for (const e of dades.entrades || []) {\n        const ids = e.receptes || (e.recepta ? [e.recepta] : []);\n        if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(e.dia || '') || !ids.length) { fets.push({ ...e, ok: false, error: 'Falta el dia (AAAA-MM-DD) o la recepta.' }); continue; }\n        const r = await api('PUT', `planning/${L}/api/my-day`, { body: { recipeIds: ids, dayKey: e.dia } });\n        fets.push({ dia: e.dia, afegides: ids, ok: true, araAlDia: ((r && r.content && r.content.recipes) || []).map((x) => x.id) });\n      }\n      resultat = fets;\n      break;\n    }\n    case 'setmana_treure': {\n      const fets = [];\n      for (const e of dades.entrades || []) {\n        if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(e.dia || '') || !e.recepta) { fets.push({ ...e, ok: false, error: 'Falta el dia o la recepta.' }); continue; }\n        await api('DELETE', `planning/${L}/api/my-day/${e.dia}/recipes/${e.recepta}`);\n        fets.push({ dia: e.dia, treta: e.recepta, ok: true });\n      }\n      resultat = fets;\n      break;\n    }\n    case 'receptes': {\n      const ids = (dades.ids || []).slice(0, 40);\n      resultat = [];\n      for (const id of ids) resultat.push(await recepta(id, !!dades.variants));\n      break;\n    }\n    case 'colleccions': {\n      let llistes = await colleccions(dades.tipus === 'oficials' ? 'oficials' : 'meves');\n      if (dades.nom) {\n        const n = String(dades.nom).toLowerCase();\n        llistes = llistes.filter((l) => String(l.titol).toLowerCase().includes(n));\n      }\n      if (dades.nomesNoms) llistes = llistes.map((l) => ({ id: l.id, titol: l.titol, nombre: l.receptes.length }));\n      resultat = llistes;\n      break;\n    }\n    case 'cercar': {\n      const r = await api('GET', `search/${L}`, { query: { query: dades.text || '', page: dades.pagina, pageSize: dades.mida || 20 } });\n      const hits = (r && (r.data || r.recipes)) || [];\n      resultat = { total: r && r.total, receptes: hits.map((x) => ({ id: x.id, titol: x.title || x.name })) };\n      break;\n    }\n    case 'llista_llegir': {\n      const r = (await api('GET', `shopping/${L}`)) || {};\n      resultat = {\n        receptes: [...(r.recipes || []), ...(r.customerRecipes || [])].map((x) => ({ id: x.id, titol: x.title })),\n        ingredients: [...(r.recipes || []), ...(r.customerRecipes || [])].flatMap((x) => (x.recipeIngredientGroups || []).map((i) => ({ id: i.id, text: ingredientText(i), tinc: !!i.isOwned }))),\n        articles: (r.additionalItems || []).map((x) => ({ id: x.id, nom: x.name, tinc: !!x.isOwned })),\n      };\n      break;\n    }\n    case 'llista_afegir': {\n      const articles = (dades.articles || []).map((x) => String(x).trim()).filter(Boolean);\n      if (!articles.length) throw new Error('Falta «articles» (llista de textos).');\n      const r = await api('POST', `shopping/${L}/additional-items/add`, { body: { itemsValue: articles } });\n      resultat = { afegits: ((r && r.data) || []).map((x) => ({ id: x.id, nom: x.name })) };\n      break;\n    }\n    case 'llista_treure': {\n      const ids = dades.ids || [];\n      if (!ids.length) throw new Error('Falta «ids» (els id dels articles a treure).');\n      await api('POST', `shopping/${L}/additional-items/remove`, { body: { additionalItemIDs: ids } });\n      resultat = { trets: ids };\n      break;\n    }\n    case 'llista_buidar': {\n      if (dades.confirmo !== true) throw new Error('Per buidar tota la llista cal \"confirmo\": true a «dades».');\n      await api('DELETE', `shopping/${L}`);\n      resultat = { buidada: true };\n      break;\n    }\n    default:\n      throw new Error(`Acció desconeguda: «${accio}». Vàlides: setmana_llegir, setmana_afegir, setmana_treure, receptes, colleccions, cercar, llista_llegir, llista_afegir, llista_treure, llista_buidar.`);\n  }\n  return [{ json: { ok: true, accio, resultat } }];\n} catch (e) {\n  return [{ json: { ok: false, accio, error: e.message } }];\n}\n"
+      },
+      "id": "abce5cf6-fb2e-44a2-adba-348d191172f6",
+      "name": "Executa acció",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Cookidoo\nLlegeix i escriu «Mi semana», receptes, col·leccions i la llista de la compra.\n\n**Credencial:** «Cookidoo (usuari i contrasenya)», tipus *Custom Auth*:\n`{\"body\": {\"username\": \"el-teu-correu\", \"password\": \"la-teva-contrasenya\"}}`\n\nNomés la fa servir el node «Envia usuari i contrasenya».\nEl token (12 h) es guarda dins de n8n per no entrar cada vegada.\n\n**Prova:** botó «Execute workflow». Només llegeix «Mi semana».",
+        "width": 520,
+        "height": 300
+      },
+      "id": "4303d37e-6b1b-4365-abf4-e4109f65b5da",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -360
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Quan el crida Claude": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prova manual": {
+      "main": [
+        [
+          {
+            "node": "Entrada i config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada i config": {
+      "main": [
+        [
+          {
+            "node": "Token guardat?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token guardat?": {
+      "main": [
+        [
+          {
+            "node": "Cal login?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cal login?": {
+      "main": [
+        [
+          {
+            "node": "Inicia login",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Executa acció",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inicia login": {
+      "main": [
+        [
+          {
+            "node": "Envia usuari i contrasenya",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envia usuari i contrasenya": {
+      "main": [
+        [
+          {
+            "node": "Acaba login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acaba login": {
+      "main": [
+        [
+          {
+            "node": "Executa acció",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Europe/Madrid"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
