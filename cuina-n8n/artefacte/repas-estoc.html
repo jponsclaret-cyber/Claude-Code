@@ -1,0 +1,750 @@
+<title>Repàs d'estoc</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: una sola columna de mòbil. Capçalera fixa amb les zones de casa (Nevera, Rebost, Congelador, Fruita, Resum),
+   files com etiquetes de pot, i una barra inferior amb els canvis pendents de desar a Notion. */
+:root {
+  --bg: #f2f5f3;
+  --surface: #ffffff;
+  --ink: #17221e;
+  --muted: #5d6b65;
+  --line: #d9e1dc;
+  --accent: #1d6b57;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcefe8;
+  --frost: #2f6390;
+  --frost-soft: #e1ecf6;
+  --warn: #a35a00;
+  --warn-soft: #fbedd6;
+  --bad: #b3261e;
+  --bad-soft: #fbe3e1;
+  --shadow: 0 1px 2px rgba(23, 34, 30, .06), 0 6px 18px rgba(23, 34, 30, .07);
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101614; --surface: #18201d; --ink: #e6eee9; --muted: #9aaba3; --line: #2a3531;
+    --accent: #5cc4a4; --accent-ink: #0c1512; --accent-soft: #1c3a31;
+    --frost: #8dbbe6; --frost-soft: #1b2a38; --warn: #f0b35c; --warn-soft: #3a2b14;
+    --bad: #f28b82; --bad-soft: #3d1d1b;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 6px 18px rgba(0, 0, 0, .3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101614; --surface: #18201d; --ink: #e6eee9; --muted: #9aaba3; --line: #2a3531;
+  --accent: #5cc4a4; --accent-ink: #0c1512; --accent-soft: #1c3a31;
+  --frost: #8dbbe6; --frost-soft: #1b2a38; --warn: #f0b35c; --warn-soft: #3a2b14;
+  --bad: #f28b82; --bad-soft: #3d1d1b;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 6px 18px rgba(0, 0, 0, .3);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.45 var(--f-body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 720px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; }
+.num { font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+
+/* Capçalera */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+.top .wrap { padding-block: 12px 0; display: grid; gap: 10px; }
+.brand { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.brand h1 { font-size: 1.55rem; font-weight: 700; letter-spacing: -.01em; }
+.brand .date { color: var(--muted); font-size: .9rem; }
+.brand .grow { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: .8rem; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.iconbtn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 5px 10px; font-size: .85rem; }
+.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin-inline: -4px; padding: 0 4px; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 0 0 auto; border: 0; background: none; padding: 9px 12px 10px; border-bottom: 3px solid transparent; color: var(--muted); font-weight: 700; display: flex; gap: 6px; align-items: baseline; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tab .n { font-family: var(--f-data); font-size: .75rem; font-weight: 400; color: var(--muted); }
+.tab .chg { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); align-self: center; }
+
+main.wrap { padding-block: 16px 120px; display: grid; gap: 16px; }
+#panel { display: grid; gap: 12px; min-width: 0; }
+
+/* Ajuda de Claude */
+.assist { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
+.assist summary { list-style: none; padding: 14px 16px; display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.assist summary::-webkit-details-marker { display: none; }
+.assist summary h2 { font-size: 1.05rem; }
+.assist summary .sub { color: var(--muted); font-size: .88rem; }
+.assist .body { padding: 0 16px 16px; display: grid; gap: 10px; }
+.assist textarea { width: 100%; min-height: 84px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 9px 14px; font-weight: 700; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn:disabled { opacity: .55; cursor: default; }
+.filebtn { position: relative; overflow: hidden; }
+.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.hint { color: var(--muted); font-size: .85rem; }
+.proposals { display: grid; gap: 6px; }
+.prop { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.prop b { font-weight: 700; }
+.prop .why { color: var(--muted); font-size: .85rem; }
+
+/* Zones */
+.zonehead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.zonehead h2 { font-size: 1.3rem; }
+.zonehead .grow { flex: 1; }
+.search { flex: 1 1 180px; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--surface); }
+.toggle { display: inline-flex; gap: 6px; align-items: center; font-size: .88rem; color: var(--muted); }
+.group { display: grid; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.group > h3 { font-family: var(--f-body); font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 10px 14px 6px; font-weight: 700; }
+.item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 10px 14px; border-top: 1px solid var(--line); align-items: center; }
+.item.dirty { background: var(--warn-soft); }
+.item.saved { background: var(--accent-soft); }
+.item .name { min-width: 0; }
+.item .name strong { font-weight: 700; overflow-wrap: anywhere; }
+.item .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 3px; }
+.tag { font-size: .72rem; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.tag.res { border-color: var(--frost); color: var(--frost); }
+.tag.check { border-style: dashed; border-color: var(--warn); color: var(--warn); }
+.tag.leg { border-color: var(--bad); color: var(--bad); }
+.notes { grid-column: 1 / -1; font-size: .82rem; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ctrl { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.qty { width: 9.5em; max-width: 42vw; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; background: var(--bg); font-size: .9rem; }
+.qty.check { border-style: dashed; border-color: var(--warn); }
+.ends { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 5px 11px; font-size: .82rem; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.ends[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: var(--surface); }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.stepper button { border: 0; background: none; width: 38px; height: 36px; font-size: 1.15rem; font-weight: 700; color: var(--frost); }
+.stepper .val { min-width: 2.6em; text-align: center; font-family: var(--f-data); }
+.add { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); background: var(--bg); }
+.add .fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 8px; }
+.add input, .add select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--surface); }
+.empty { padding: 18px 14px; color: var(--muted); }
+
+/* Fruita */
+.fruit { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--bg); padding: 6px 10px; font-size: .82rem; font-weight: 700; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"].no { background: var(--bad); color: var(--surface); }
+.seg button[aria-pressed="true"].poca { background: var(--warn); color: var(--surface); }
+.seg button[aria-pressed="true"].prou { background: var(--accent); color: var(--accent-ink); }
+
+/* Resum */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 8px; }
+.card h3 { font-size: 1.05rem; }
+.card ul { margin: 0; padding-left: 1.1em; display: grid; gap: 3px; }
+pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; max-height: 320px; overflow: auto; }
+
+/* Avisos i barra de desar */
+.notice { border-radius: var(--r); padding: 12px 14px; display: grid; gap: 8px; background: var(--warn-soft); color: var(--ink); border: 1px solid var(--warn); }
+.notice.bad { background: var(--bad-soft); border-color: var(--bad); }
+.skeleton { height: 54px; border-top: 1px solid var(--line); background: linear-gradient(90deg, var(--surface), var(--bg), var(--surface)); background-size: 200% 100%; animation: sh 1.4s infinite linear; }
+@keyframes sh { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -6px 18px rgba(0, 0, 0, .08); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.savebar .wrap { display: flex; gap: 12px; align-items: center; padding-block: 10px; }
+.savebar .grow { flex: 1; min-width: 0; }
+.sheet { position: fixed; inset: 0; z-index: 20; background: rgba(10, 16, 14, .45); display: grid; align-items: end; }
+.sheet .panel { background: var(--surface); border-radius: 16px 16px 0 0; max-height: 86vh; overflow: auto; padding-bottom: env(safe-area-inset-bottom, 0px); }
+.sheet .panel .wrap { padding-block: 18px; display: grid; gap: 12px; }
+.chlist { display: grid; gap: 4px; font-size: .92rem; }
+.chlist div { display: flex; gap: 8px; justify-content: space-between; border-bottom: 1px dashed var(--line); padding: 4px 0; }
+.chlist .st { font-family: var(--f-data); font-size: .8rem; white-space: nowrap; }
+.st.ok { color: var(--accent); } .st.err { color: var(--bad); } .st.wait { color: var(--muted); }
+@media (max-width: 420px) {
+  .item { grid-template-columns: 1fr; }
+  .ctrl { justify-content: flex-start; }
+  .qty { width: 100%; max-width: none; flex: 1; }
+}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <h1>Repàs d'estoc</h1>
+      <span class="date" id="avui"></span>
+      <span class="grow"></span>
+      <span class="pill warn" id="estat"><span class="dot"></span><span id="estatText">Connectant amb Notion…</span></span>
+      <button class="iconbtn" id="recarrega" type="button">Torna a llegir</button>
+    </div>
+    <nav class="tabs" role="tablist" id="tabs"></nav>
+  </div>
+</header>
+
+<main class="wrap" id="main">
+  <div id="avis" hidden></div>
+
+  <details class="assist" id="assist">
+    <summary>
+      <div>
+        <h2>Explica-ho a Claude</h2>
+        <div class="sub">«S'ha acabat la llet, queden 2 iogurts i he congelat 3 racions de curry.» També pots enviar fotos de la nevera o del congelador.</div>
+      </div>
+    </summary>
+    <div class="body">
+      <textarea id="assistText" placeholder="Què ha canviat des del darrer repàs?"></textarea>
+      <div class="row-actions">
+        <button class="btn primary" id="assistGo" type="button">Proposa canvis</button>
+        <label class="btn filebtn" id="fotoLabel" hidden>Afegeix fotos<input type="file" id="fotos" accept="image/*" multiple></label>
+        <span class="hint" id="assistInfo"></span>
+      </div>
+      <div class="proposals" id="proposals"></div>
+    </div>
+  </details>
+
+  <section id="panel"></section>
+</main>
+
+<div class="savebar" id="savebar">
+  <div class="wrap">
+    <div class="grow"><strong id="pendents">Cap canvi pendent</strong><div class="hint" id="pendentsSub">Toca una quantitat o «S'acaba» per corregir-la.</div></div>
+    <button class="btn primary" id="desa" type="button" disabled>Revisa i desa</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="wrap">
+      <h2 id="sheetTitle">Desar a Notion</h2>
+      <div class="hint" id="sheetSub"></div>
+      <div class="chlist" id="sheetList"></div>
+      <div class="row-actions">
+        <button class="btn primary" id="sheetGo" type="button">Desa-ho</button>
+        <button class="btn" id="sheetClose" type="button">Torna</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const NOTION = 'Notion';
+  const DS = {
+    rebost: 'collection://c53084b9-8851-4e2f-ac66-df9873a7fc00',
+    congelador: 'collection://242d6c01-5431-4152-8b10-94224199cf37',
+  };
+  const CATEGORIES = ['Làctics i ous', 'Verdura bàsica', 'Esmorzars', 'Arròs i pasta', 'Farines i pa ratllat', 'Olis i vinagres', 'Espècies', 'Brous', 'Conserves', 'Licors de cuina', 'Pa i galetes', 'Casa', 'Altres'];
+  const TIPUS = ['Plat cuinat', 'Croquetes', 'Carn', 'Peix', 'Verdura', 'Brou i salses', 'Pa i masses', 'Altres'];
+  const FRUITES = ['Taronges', 'Mandarines', 'Plàtans', 'Kiwis', 'Raïm', 'Pomes', 'Peres', 'Llimones', 'Bossetes de fruita triturada'];
+  const ZONES = [
+    { id: 'nevera', nom: 'Nevera' },
+    { id: 'rebost', nom: 'Rebost' },
+    { id: 'congelador', nom: 'Congelador' },
+    { id: 'fruita', nom: 'Fruita' },
+    { id: 'resum', nom: 'Resum' },
+  ];
+
+  const S = {
+    items: new Map(),
+    nous: [],
+    fruita: {},
+    fruitaNota: '',
+    tab: 'nevera',
+    filtre: '',
+    nomesAcaba: false,
+    carregant: true,
+    errors: {},
+    ultimRepas: null,
+    propostes: null,
+  };
+  let mcp = null; let sample = null; let db = null; let perms = null;
+  let fotos = [];
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* res */ } } };
+  S.tab = store.get('repas.tab') || 'nevera';
+
+  const avui = new Date();
+  $('avui').textContent = avui.toLocaleDateString('ca-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  // ── Notion ─────────────────────────────────────────────
+  const payloadDe = (r) => {
+    let p = r && (r.payload !== undefined ? r.payload : r);
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { /* text */ } }
+    return p;
+  };
+  const textError = (e, accio) => {
+    const c = e && e.code;
+    if (c === 'server_not_connected' || c === 'server_not_found') return 'Notion no està connectat al teu compte. Afegeix-lo a claude.ai → Configuració → Connectors i torna a obrir la pàgina.';
+    if (c === 'needs_reauth') return 'Cal tornar a connectar Notion a claude.ai → Configuració → Connectors.';
+    if (c === 'not_in_manifest' || c === 'approval_required' || c === 'not_granted') return 'Aquesta pàgina encara no té permís per fer servir Notion. Torna-ho a provar i accepta-ho quan t\'ho demani.';
+    if (c === 'blocked_by_policy') return 'La teva organització no deixa fer servir Notion des d\'aquí.';
+    if (c === 'server_unavailable' || c === 'upstream_error') return `Notion no respon ara mateix (${accio}). Torna-ho a provar d'aquí a un moment.`;
+    if (c === 'tool_error') return `Notion ha rebutjat l'operació (${accio}): ${String(e.message || '').slice(0, 200)}`;
+    return `No s'ha pogut ${accio}: ${String((e && e.message) || e).slice(0, 200)}`;
+  };
+
+  async function consulta(dsUrl, filter, sort) {
+    const r = await mcp.callTool(NOTION, 'notion-query-data-sources', {
+      data: { mode: 'rows', data_source_url: dsUrl, limit: 100, ...(filter ? { filter } : {}), ...(sort ? { sort } : {}) },
+    }, { cache: false });
+    const p = payloadDe(r);
+    const res = (p && (p.results || p.rows)) || [];
+    return { rows: Array.isArray(res) ? res : [], mesFiles: !!(p && p.has_more) };
+  }
+  const filtreLloc = (op, v) => ({ type: 'group', operator: 'and', filters: [{ type: 'property', property: 'Lloc', propertyType: 'select', operator: op, value: { type: 'exact', value: v } }] });
+
+  async function carrega() {
+    S.carregant = true; S.errors = {}; render();
+    setEstat('warn', 'Llegint Notion…');
+    if (!mcp) {
+      S.carregant = false;
+      setEstat('bad', 'Sense connexió amb Notion');
+      mostraAvis('Aquesta vista no pot fer servir els connectors de claude.ai. Obre la pàgina a claude.ai, on hi tens connectat Notion.', true);
+      render();
+      return;
+    }
+    const prev = S.items;
+    const nous = new Map();
+    const avisos = [];
+    const feines = [
+      ['nevera', consulta(DS.rebost, filtreLloc('enum_is', 'Nevera'))],
+      ['rebost', consulta(DS.rebost, filtreLloc('enum_is_not', 'Nevera'))],
+      ['congelador', consulta(DS.congelador, { type: 'group', operator: 'and', filters: [{ type: 'property', property: 'Racions', propertyType: 'number', operator: 'number_greater_than', value: { type: 'exact', value: 0 } }] })],
+    ];
+    const res = await Promise.allSettled(feines.map((f) => f[1]));
+    let ok = 0;
+    res.forEach((r, i) => {
+      const zona = feines[i][0];
+      if (r.status === 'rejected') { S.errors[zona] = textError(r.reason, 'llegir ' + zona); return; }
+      ok++;
+      if (r.value.mesFiles) avisos.push(`A «${zona}» hi ha més de 100 files: només en mostro 100.`);
+      for (const row of r.value.rows) {
+        const it = zona === 'congelador' ? deCongelador(row) : deRebost(row, zona);
+        if (!it.id) continue;
+        const vell = prev.get(it.id);
+        if (vell && vell.edit && Object.keys(vell.edit).length) it.edit = vell.edit;
+        nous.set(it.id, it);
+      }
+    });
+    S.items = nous;
+    S.carregant = false;
+    if (ok === 3) setEstat('ok', `Notion · ${nous.size} productes`);
+    else if (ok) setEstat('warn', 'Notion · lectura parcial');
+    else setEstat('bad', 'No he pogut llegir Notion');
+    const errs = Object.values(S.errors);
+    if (errs.length === 3 && errs.every((x) => x === errs[0])) mostraAvis(errs[0], true);
+    else if (avisos.length) mostraAvis(avisos.join(' '), false);
+    else amagaAvis();
+    render();
+  }
+  function deRebost(row, zona) {
+    const q = row['Quantitat'] ?? '';
+    const s = row["S'acaba"] === '__YES__' || row["S'acaba"] === true;
+    return { id: row.url, zona, nom: row['Producte'] || '(sense nom)', grup: row['Categoria'] || 'Sense categoria', notes: row['Notes'] || '', orig: { quantitat: String(q), sacaba: s }, edit: {} };
+  }
+  function deCongelador(row) {
+    const rac = Number(row['Racions']);
+    return { id: row.url, zona: 'congelador', nom: row['Què és'] || '(sense nom)', grup: row['Tipus'] || 'Altres', notes: row['Notes'] || '', data: row['date:Data:start'] || '', orig: { racions: Number.isFinite(rac) ? rac : 0 }, edit: {} };
+  }
+  const valor = (it, camp) => (camp in it.edit ? it.edit[camp] : it.orig[camp]);
+  const brut = (it) => Object.keys(it.edit).some((k) => it.edit[k] !== it.orig[k]);
+  function edita(it, camp, v) {
+    if (v === it.orig[camp]) delete it.edit[camp]; else it.edit[camp] = v;
+    it.desat = false;
+  }
+
+  // ── Estat i avisos ─────────────────────────────────────
+  function setEstat(tipus, text) {
+    const el = $('estat');
+    el.className = 'pill' + (tipus === 'ok' ? '' : tipus === 'bad' ? ' bad' : ' warn');
+    $('estatText').textContent = text;
+  }
+  function mostraAvis(text, greu) {
+    const el = $('avis');
+    el.className = 'notice' + (greu ? ' bad' : '');
+    el.textContent = text;
+    el.hidden = false;
+  }
+  function amagaAvis() { $('avis').hidden = true; }
+
+  // ── Render ─────────────────────────────────────────────
+  function comptes() {
+    const c = { nevera: 0, rebost: 0, congelador: 0 };
+    const ch = { nevera: 0, rebost: 0, congelador: 0, fruita: 0 };
+    for (const it of S.items.values()) { c[it.zona]++; if (brut(it)) ch[it.zona]++; }
+    for (const n of S.nous) ch[n.zona] = (ch[n.zona] || 0) + 1;
+    if (Object.keys(S.fruita).length) ch.fruita = 1;
+    return { c, ch };
+  }
+  function renderTabs() {
+    const { c, ch } = comptes();
+    $('tabs').innerHTML = ZONES.map((z) => `<button class="tab" role="tab" type="button" data-tab="${z.id}" aria-selected="${S.tab === z.id}">${esc(z.nom)}${c[z.id] != null ? `<span class="n">${c[z.id]}</span>` : ''}${ch[z.id] ? '<span class="chg" title="Canvis pendents"></span>' : ''}</button>`).join('');
+  }
+  function render() {
+    renderTabs();
+    const p = $('panel');
+    if (S.tab === 'fruita') p.innerHTML = renderFruita();
+    else if (S.tab === 'resum') p.innerHTML = renderResum();
+    else p.innerHTML = renderZona(S.tab);
+    renderSavebar();
+  }
+  function renderZona(zona) {
+    const nom = ZONES.find((z) => z.id === zona).nom;
+    let html = `<div class="zonehead"><h2>${esc(nom)}</h2><span class="grow"></span>
+      <input class="search" id="cerca" type="search" placeholder="Cerca a ${esc(nom.toLowerCase())}" value="${esc(S.filtre)}">
+      ${zona !== 'congelador' ? `<label class="toggle"><input type="checkbox" id="nomesAcaba" ${S.nomesAcaba ? 'checked' : ''}> Només el que s'acaba</label>` : ''}</div>`;
+    if (S.errors[zona]) return html + `<div class="notice bad">${esc(S.errors[zona])}</div>`;
+    if (S.carregant && ![...S.items.values()].some((i) => i.zona === zona)) {
+      return html + `<div class="group"><h3>Carregant</h3>${'<div class="skeleton"></div>'.repeat(5)}</div>`;
+    }
+    const f = S.filtre.trim().toLowerCase();
+    const items = [...S.items.values()].filter((it) => it.zona === zona)
+      .filter((it) => !f || it.nom.toLowerCase().includes(f) || it.grup.toLowerCase().includes(f))
+      .filter((it) => zona === 'congelador' || !S.nomesAcaba || valor(it, 'sacaba'));
+    const grups = new Map();
+    for (const it of items) { if (!grups.has(it.grup)) grups.set(it.grup, []); grups.get(it.grup).push(it); }
+    const ordre = zona === 'congelador' ? TIPUS : CATEGORIES;
+    const claus = [...grups.keys()].sort((a, b) => (ordre.indexOf(a) + 100 * (ordre.indexOf(a) < 0)) - (ordre.indexOf(b) + 100 * (ordre.indexOf(b) < 0)) || a.localeCompare(b));
+    for (const g of claus) {
+      const llista = grups.get(g).sort((a, b) => a.nom.localeCompare(b.nom, 'ca'));
+      html += `<div class="group"><h3>${esc(g)} · <span class="num">${llista.length}</span></h3>${llista.map(renderItem).join('')}</div>`;
+    }
+    const nousZona = S.nous.filter((n) => n.zona === zona);
+    if (nousZona.length) html += `<div class="group"><h3>Nous (encara no desats)</h3>${nousZona.map((n) => `<div class="item dirty"><div class="name"><strong>${esc(n.nom)}</strong><div class="meta"><span class="tag">${esc(n.grup)}</span></div></div><div class="ctrl"><span class="num">${esc(zona === 'congelador' ? n.racions + ' rac.' : n.quantitat)}</span><button class="iconbtn" type="button" data-treu-nou="${n.k}">Treu</button></div></div>`).join('')}</div>`;
+    if (!items.length && !S.carregant) html += `<div class="group"><div class="empty">${f || S.nomesAcaba ? 'Cap producte coincideix amb el filtre.' : 'No hi ha res apuntat aquí.'}</div></div>`;
+    html += renderAfegir(zona);
+    return html;
+  }
+  function renderItem(it) {
+    const d = brut(it);
+    const reserves = (it.notes.match(/📌[^\n]*/g) || []);
+    // Només ensenyo les notes que importen per al repàs: reserves, sobres previstes i avisos.
+    const notesSenseReserves = /📌|⏳|⚠️/.test(it.notes) ? it.notes : '';
+    const tags = [];
+    if (reserves.length) tags.push(`<span class="tag res" title="${esc(reserves.join(' · '))}">📌 reservat</span>`);
+    if (/⚠️/.test(it.nom + it.notes)) tags.push('<span class="tag leg">⚠️ llegum</span>');
+    if (it.data) tags.push(`<span class="tag num">${esc(it.data.split('-').reverse().slice(0, 2).join('-'))}</span>`);
+    let ctrl;
+    if (it.zona === 'congelador') {
+      const r = valor(it, 'racions');
+      ctrl = `<div class="stepper" aria-label="Racions"><button type="button" data-rac="-1" data-id="${esc(it.id)}" aria-label="Una ració menys">−</button><span class="val">${esc(r)}</span><button type="button" data-rac="1" data-id="${esc(it.id)}" aria-label="Una ració més">+</button></div>`;
+    } else {
+      const q = valor(it, 'quantitat');
+      const perComprovar = /per comprovar/i.test(q);
+      if (perComprovar && !('quantitat' in it.edit)) tags.push('<span class="tag check">per comprovar</span>');
+      ctrl = `<input class="qty${perComprovar ? ' check' : ''}" type="text" data-q="${esc(it.id)}" id="q-${esc(it.id.slice(-12))}" value="${esc(q)}" aria-label="Quantitat de ${esc(it.nom)}">
+        <button class="ends" type="button" data-ends="${esc(it.id)}" aria-pressed="${valor(it, 'sacaba')}">S'acaba</button>`;
+    }
+    return `<div class="item${d ? ' dirty' : it.desat ? ' saved' : ''}"><div class="name"><strong>${esc(it.nom)}</strong>${tags.length ? `<div class="meta">${tags.join('')}</div>` : ''}</div><div class="ctrl">${ctrl}</div>${notesSenseReserves ? `<div class="notes">${esc(notesSenseReserves)}</div>` : ''}</div>`;
+  }
+  function renderAfegir(zona) {
+    const opts = (zona === 'congelador' ? TIPUS : CATEGORIES).map((c) => `<option>${esc(c)}</option>`).join('');
+    return `<form class="group add" data-afegir="${zona}">
+      <h3 style="padding:0">Afegeix a ${esc(ZONES.find((z) => z.id === zona).nom.toLowerCase())}</h3>
+      <div class="fields">
+        <input name="nom" id="add-nom-${zona}" placeholder="${zona === 'congelador' ? 'Què és (p. ex. curry de pollastre)' : 'Producte'}" required>
+        <input name="q" id="add-q-${zona}" placeholder="${zona === 'congelador' ? 'Racions' : 'Quantitat'}" ${zona === 'congelador' ? 'inputmode="numeric"' : ''} required>
+      </div>
+      <div class="fields"><select name="grup" id="add-grup-${zona}" aria-label="${zona === 'congelador' ? 'Tipus' : 'Categoria'}">${opts}</select><button class="btn" type="submit">Afegeix</button></div>
+    </form>`;
+  }
+  function renderFruita() {
+    const opt = (f, v, label) => `<button type="button" class="${v}" data-fruit="${esc(f)}" data-v="${v}" aria-pressed="${S.fruita[f] === v}">${label}</button>`;
+    return `<div class="zonehead"><h2>Fruita</h2></div>
+      <p class="hint">Notion no porta la fruita. Digues què en queda i la sumo a la compra (unes 9-10 kg per setmana).</p>
+      <div class="group">${FRUITES.map((f) => `<div class="fruit"><strong>${esc(f)}</strong><div class="seg">${opt(f, 'no', 'No en queda')}${opt(f, 'poca', 'Poca')}${opt(f, 'prou', 'Prou')}</div></div>`).join('')}
+      <div class="add"><input id="fruitaNota" placeholder="Alguna cosa més? (p. ex. «els plàtans són molt madurs»)" value="${esc(S.fruitaNota)}"></div></div>`;
+  }
+  function llistaCompra() {
+    const acaben = [...S.items.values()].filter((it) => it.zona !== 'congelador' && valor(it, 'sacaba')).map((it) => `${it.nom}${valor(it, 'quantitat') ? ` (queda: ${valor(it, 'quantitat')})` : ''}`);
+    const perComprovar = [...S.items.values()].filter((it) => it.zona !== 'congelador' && /per comprovar/i.test(valor(it, 'quantitat'))).map((it) => it.nom);
+    const fruita = FRUITES.filter((f) => S.fruita[f] === 'no' || S.fruita[f] === 'poca').map((f) => `${f} (${S.fruita[f] === 'no' ? 'no en queda' : 'en queda poca'})`);
+    const plats = [...S.items.values()].filter((it) => it.zona === 'congelador' && it.grup === 'Plat cuinat' && valor(it, 'racions') > 0).map((it) => `${it.nom}: ${valor(it, 'racions')} rac.`);
+    return { acaben, perComprovar, fruita, plats };
+  }
+  function textResum() {
+    const l = llistaCompra();
+    const linia = (t, xs) => xs.length ? `${t}\n${xs.map((x) => '- ' + x).join('\n')}` : `${t}\n- (res)`;
+    return [
+      `Repàs d'estoc · ${avui.toLocaleDateString('ca-ES')}`,
+      linia("S'acaba (a la compra):", l.acaben),
+      linia('Fruita per comprar:', l.fruita),
+      S.fruitaNota ? `Nota de fruita: ${S.fruitaNota}` : '',
+      linia('Plats cuinats al congelador:', l.plats),
+      l.perComprovar.length ? linia('Encara per comprovar:', l.perComprovar) : '',
+    ].filter(Boolean).join('\n\n');
+  }
+  function renderResum() {
+    const l = llistaCompra();
+    const li = (xs, buit) => xs.length ? `<ul>${xs.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : `<div class="hint">${buit}</div>`;
+    const ultim = S.ultimRepas ? `Últim repàs desat: ${new Date(S.ultimRepas).toLocaleString('ca-ES', { weekday: 'long', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}.` : 'Encara no hi ha cap repàs desat.';
+    return `<div class="zonehead"><h2>Resum</h2></div>
+      <div class="card"><h3>S'acaba · <span class="num">${l.acaben.length}</span></h3>${li(l.acaben, 'No hi ha res marcat com «S\'acaba».')}</div>
+      <div class="card"><h3>Fruita per comprar</h3>${li(l.fruita, Object.keys(S.fruita).length ? 'De fruita en teniu prou.' : 'Encara no has dit què en queda (pestanya Fruita).')}</div>
+      <div class="card"><h3>Plats cuinats al congelador</h3>${li(l.plats, 'No n\'hi ha cap.')}</div>
+      ${l.perComprovar.length ? `<div class="card"><h3>Encara per comprovar · <span class="num">${l.perComprovar.length}</span></h3>${li(l.perComprovar, '')}</div>` : ''}
+      <div class="card"><h3>Per passar a Claude</h3><pre class="copy" id="resumText">${esc(textResum())}</pre>
+        <div class="row-actions"><button class="btn" type="button" id="copia">Copia el resum</button><span class="hint" id="copiaInfo">${esc(ultim)}</span></div></div>`;
+  }
+  function renderSavebar() {
+    const canvis = [...S.items.values()].filter(brut).length + S.nous.length;
+    const fruita = Object.keys(S.fruita).length > 0;
+    $('pendents').textContent = canvis ? `${canvis} canvi${canvis === 1 ? '' : 's'} per desar` : 'Cap canvi pendent';
+    $('pendentsSub').textContent = canvis ? 'Es desaran a Notion quan confirmis.' : fruita ? 'Pots desar el repàs amb la fruita.' : 'Toca una quantitat o «S\'acaba» per corregir-la.';
+    $('desa').disabled = !canvis && !fruita;
+  }
+
+  // ── Interacció ─────────────────────────────────────────
+  $('tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]'); if (!b) return;
+    S.tab = b.dataset.tab; S.filtre = ''; store.set('repas.tab', S.tab); render(); window.scrollTo({ top: 0 });
+  });
+  $('panel').addEventListener('click', (e) => {
+    const ends = e.target.closest('[data-ends]');
+    if (ends) { const it = S.items.get(ends.dataset.ends); edita(it, 'sacaba', !valor(it, 'sacaba')); render(); return; }
+    const rac = e.target.closest('[data-rac]');
+    if (rac) { const it = S.items.get(rac.dataset.id); edita(it, 'racions', Math.max(0, valor(it, 'racions') + Number(rac.dataset.rac))); render(); return; }
+    const fr = e.target.closest('[data-fruit]');
+    if (fr) { const f = fr.dataset.fruit; if (S.fruita[f] === fr.dataset.v) delete S.fruita[f]; else S.fruita[f] = fr.dataset.v; render(); return; }
+    const tn = e.target.closest('[data-treu-nou]');
+    if (tn) { S.nous = S.nous.filter((n) => String(n.k) !== tn.dataset.treuNou); render(); return; }
+    if (e.target.id === 'copia') copia();
+  });
+  $('panel').addEventListener('change', (e) => {
+    if (e.target.matches('[data-q]')) { const it = S.items.get(e.target.dataset.q); edita(it, 'quantitat', e.target.value.trim()); render(); }
+    if (e.target.id === 'nomesAcaba') { S.nomesAcaba = e.target.checked; render(); }
+    if (e.target.id === 'fruitaNota') { S.fruitaNota = e.target.value.trim(); renderSavebar(); }
+  });
+  let cercaT;
+  $('panel').addEventListener('input', (e) => {
+    if (e.target.id !== 'cerca') return;
+    clearTimeout(cercaT);
+    const v = e.target.value;
+    cercaT = setTimeout(() => { S.filtre = v; render(); const c = $('cerca'); if (c) { c.focus(); c.setSelectionRange(v.length, v.length); } }, 200);
+  });
+  let kNou = 1;
+  $('panel').addEventListener('submit', (e) => {
+    const f = e.target.closest('[data-afegir]'); if (!f) return;
+    e.preventDefault();
+    const zona = f.dataset.afegir;
+    const nom = f.nom.value.trim(); const q = f.q.value.trim(); const grup = f.grup.value;
+    if (!nom || !q) return;
+    if (zona === 'congelador') {
+      const n = Number(q.replace(',', '.'));
+      if (!Number.isFinite(n) || n <= 0) { f.q.setCustomValidity('Posa un nombre de racions'); f.q.reportValidity(); return; }
+      S.nous.push({ k: kNou++, zona, nom, grup, racions: n });
+    } else {
+      S.nous.push({ k: kNou++, zona, nom, grup, quantitat: q });
+    }
+    render();
+  });
+  async function copia() {
+    const t = textResum();
+    try { await navigator.clipboard.writeText(t); $('copiaInfo').textContent = 'Copiat.'; }
+    catch (e) {
+      const pre = $('resumText'); const r = document.createRange(); r.selectNodeContents(pre);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      $('copiaInfo').textContent = 'Seleccionat: copia\'l amb el menú del sistema.';
+    }
+  }
+  $('recarrega').addEventListener('click', () => carrega());
+
+  // ── Desar ──────────────────────────────────────────────
+  function feinesPendents() {
+    const f = [];
+    for (const it of S.items.values()) {
+      if (!brut(it)) continue;
+      const props = {}; const desc = [];
+      if ('quantitat' in it.edit && it.edit.quantitat !== it.orig.quantitat) { props['Quantitat'] = it.edit.quantitat; desc.push(`quantitat «${it.edit.quantitat || '—'}»`); }
+      if ('sacaba' in it.edit && it.edit.sacaba !== it.orig.sacaba) { props["S'acaba"] = it.edit.sacaba ? '__YES__' : '__NO__'; desc.push(it.edit.sacaba ? "marca «S'acaba»" : "treu «S'acaba»"); }
+      if ('racions' in it.edit && it.edit.racions !== it.orig.racions) { props['Racions'] = it.edit.racions; desc.push(`${it.orig.racions} → ${it.edit.racions} racions`); }
+      f.push({ tipus: 'update', it, props, text: `${it.nom}: ${desc.join(', ')}` });
+    }
+    for (const n of S.nous) {
+      const today = new Date(); const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const props = n.zona === 'congelador'
+        ? { 'Què és': n.nom, Racions: n.racions, Tipus: n.grup, 'date:Data:start': iso, 'date:Data:is_datetime': 0 }
+        : { Producte: n.nom, Quantitat: n.quantitat, Lloc: n.zona === 'nevera' ? 'Nevera' : 'Rebost', Categoria: n.grup, "S'acaba": '__NO__' };
+      f.push({ tipus: 'nou', n, props, text: `Nou a ${n.zona}: ${n.nom} (${n.zona === 'congelador' ? n.racions + ' rac.' : n.quantitat})` });
+    }
+    return f;
+  }
+  let feinesSheet = [];
+  $('desa').addEventListener('click', () => {
+    feinesSheet = feinesPendents();
+    const fruita = Object.keys(S.fruita).length > 0;
+    $('sheetSub').textContent = feinesSheet.length
+      ? `Es desaran ${feinesSheet.length} canvi${feinesSheet.length === 1 ? '' : 's'} a Notion.${db ? ' També guardo el resum del repàs (amb la fruita) perquè Claude el pugui llegir.' : ''}`
+      : (db && fruita ? 'No hi ha canvis a Notion. Guardo el resum del repàs amb la fruita.' : 'No hi ha res per desar.');
+    $('sheetList').innerHTML = feinesSheet.map((f, i) => `<div><span>${esc(f.text)}</span><span class="st wait" id="st-${i}">pendent</span></div>`).join('');
+    $('sheetGo').disabled = false; $('sheetGo').textContent = 'Desa-ho';
+    $('sheet').hidden = false;
+  });
+  $('sheetClose').addEventListener('click', () => { $('sheet').hidden = true; });
+  $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) $('sheet').hidden = true; });
+  $('sheetGo').addEventListener('click', async () => {
+    const go = $('sheetGo'); go.disabled = true; go.textContent = 'Desant…';
+    let errors = 0;
+    for (let i = 0; i < feinesSheet.length; i++) {
+      const f = feinesSheet[i]; const st = $('st-' + i);
+      st.className = 'st wait'; st.textContent = 'desant…';
+      try {
+        if (f.tipus === 'update') {
+          await mcp.callTool(NOTION, 'notion-update-page', { page_id: f.it.id, command: 'update_properties', properties: f.props, allow_async: false });
+          f.it.orig = { ...f.it.orig, ...f.it.edit }; f.it.edit = {}; f.it.desat = true;
+        } else {
+          await mcp.callTool(NOTION, 'notion-create-pages', { parent: { type: 'data_source_id', data_source_id: (f.n.zona === 'congelador' ? DS.congelador : DS.rebost).replace('collection://', '') }, pages: [{ properties: f.props }], allow_async: false });
+          S.nous = S.nous.filter((x) => x !== f.n);
+        }
+        st.className = 'st ok'; st.textContent = 'desat';
+      } catch (e) {
+        errors++; st.className = 'st err'; st.textContent = 'error';
+        st.title = textError(e, 'desar');
+        if (['server_unavailable', 'upstream_error', 'cancelled'].includes(e && e.code)) st.textContent = 'no sé si s\'ha desat';
+      }
+    }
+    if (db) {
+      try {
+        const l = llistaCompra();
+        await db.doc('repassos/ultim').set({ data: new Date().toISOString(), sacaba: l.acaben, fruita: S.fruita, fruitaNota: S.fruitaNota, platsCongelador: l.plats, perComprovar: l.perComprovar, resum: textResum() });
+        S.ultimRepas = new Date().toISOString();
+      } catch (e) { errors++; $('sheetSub').textContent = 'No he pogut guardar el resum del repàs (Notion sí que s\'ha desat).'; }
+    }
+    go.textContent = errors ? `Fet amb ${errors} error${errors === 1 ? '' : 's'}` : 'Desat';
+    if (!errors) $('sheetSub').textContent = 'Tot desat. Torno a llegir Notion per comprovar-ho.';
+    render();
+    if (feinesSheet.length) setTimeout(() => { carrega(); }, 600);
+  });
+
+  // ── Claude ─────────────────────────────────────────────
+  function compactaEstoc() {
+    const out = []; const claus = {};
+    let i = 0;
+    for (const it of S.items.values()) {
+      const k = 'p' + (i++);
+      claus[k] = it.id;
+      out.push(it.zona === 'congelador'
+        ? { k, z: 'congelador', nom: it.nom, tipus: it.grup, racions: valor(it, 'racions') }
+        : { k, z: it.zona, nom: it.nom, cat: it.grup, quantitat: valor(it, 'quantitat'), sacaba: valor(it, 'sacaba') });
+    }
+    return { out, claus };
+  }
+  $('assistGo').addEventListener('click', async () => {
+    const text = $('assistText').value.trim();
+    if (!sample) { $('assistInfo').textContent = 'Claude no està disponible en aquesta vista.'; return; }
+    if (!text && !fotos.length) { $('assistInfo').textContent = 'Escriu què ha canviat o afegeix una foto.'; return; }
+    if (!S.items.size) { $('assistInfo').textContent = 'Primer cal llegir l\'estoc de Notion.'; return; }
+    const { out, claus } = compactaEstoc();
+    const btn = $('assistGo'); btn.disabled = true; $('assistInfo').textContent = 'Claude ho està mirant…';
+    const prompt = [
+      'Ets l\'ajudant de cuina d\'una família. Tens l\'estoc de casa (nevera, rebost i congelador) en JSON i el que explica en Jimix' + (fotos.length ? ' més unes fotos' : '') + '.',
+      'Proposa NOMÉS els canvis que es dedueixin clarament del text o de les fotos. No inventis quantitats. Escriu en català.',
+      'Regles: al rebost i a la nevera, «quantitat» és un text curt (p. ex. "2 bricks", "mig paquet", "1 kg"); «sacaba» és true si se n\'ha acabat o queda l\'últim. Al congelador, «racions» és un nombre (0 = ja no n\'hi ha).',
+      'Si parla d\'un producte que no és a la llista, posa\'l a «nous» (zona nevera, rebost o congelador; per al congelador, racions i tipus; per a la resta, quantitat i categoria).',
+      'Categories vàlides: ' + CATEGORIES.join(', ') + '. Tipus de congelador vàlids: ' + TIPUS.join(', ') + '.',
+      'Respon NOMÉS amb un objecte JSON: {"canvis":[{"k":"p3","quantitat":"…","sacaba":true,"racions":2,"motiu":"…"}],"nous":[{"zona":"congelador","nom":"…","racions":3,"tipus":"Plat cuinat","quantitat":"","categoria":"","motiu":"…"}],"dubtes":["…"]}. Inclou a cada canvi només els camps que canvien.',
+      '',
+      'ESTOC:', JSON.stringify(out),
+      '',
+      'EL QUE EXPLICA:', text || '(només fotos)',
+    ].join('\n');
+    try {
+      const r = await sample.json(prompt, { cache: false, ...(fotos.length ? { images: fotos } : {}) });
+      S.propostes = { r, claus };
+      renderPropostes();
+      $('assistInfo').textContent = '';
+    } catch (e) {
+      const m = {
+        not_granted: 'No has deixat que aquesta pàgina faci servir Claude.', sampling_disabled: 'Claude no està disponible per a aquest compte.',
+        rate_limited: 'Massa peticions seguides: espera una mica.', invalid_json: 'Claude no ha respost en el format esperat. Torna-ho a provar.',
+        images_unavailable: 'Aquesta vista no pot enviar fotos: prova-ho només amb text.', image_rejected: 'Alguna foto no es pot fer servir (massa gran o format estrany).',
+        prompt_too_large: 'Hi ha massa dades per enviar d\'una vegada.', refused: 'Claude no ho ha volgut processar.',
+      };
+      $('assistInfo').textContent = m[e && e.code] || 'No ha funcionat. Torna-ho a provar.';
+      if (e && (e.code === 'not_granted' || e.code === 'sampling_disabled')) $('assistGo').hidden = true;
+    } finally { btn.disabled = false; }
+  });
+  function renderPropostes() {
+    const box = $('proposals');
+    if (!S.propostes) { box.innerHTML = ''; return; }
+    const { r, claus } = S.propostes;
+    const canvis = Array.isArray(r && r.canvis) ? r.canvis : [];
+    const nous = Array.isArray(r && r.nous) ? r.nous : [];
+    const dubtes = Array.isArray(r && r.dubtes) ? r.dubtes : [];
+    const files = [];
+    canvis.forEach((c, i) => {
+      const it = S.items.get(claus[c.k]); if (!it) return;
+      const parts = [];
+      if (c.quantitat != null && it.zona !== 'congelador') parts.push(`quantitat «${c.quantitat}»`);
+      if (typeof c.sacaba === 'boolean' && it.zona !== 'congelador') parts.push(c.sacaba ? "s'acaba" : "ja no s'acaba");
+      if (c.racions != null && it.zona === 'congelador') parts.push(`${c.racions} racions`);
+      if (!parts.length) return;
+      files.push(`<label class="prop"><input type="checkbox" checked data-pc="${i}"><span><b>${esc(it.nom)}</b>: ${esc(parts.join(', '))}${c.motiu ? `<div class="why">${esc(c.motiu)}</div>` : ''}</span></label>`);
+    });
+    nous.forEach((n, i) => {
+      if (!n || !n.nom || !['nevera', 'rebost', 'congelador'].includes(n.zona)) return;
+      const det = n.zona === 'congelador' ? `${Number(n.racions) || 1} rac. · ${n.tipus || 'Altres'}` : `${n.quantitat || '?'} · ${n.categoria || 'Altres'}`;
+      files.push(`<label class="prop"><input type="checkbox" checked data-pn="${i}"><span><b>Nou a ${esc(n.zona)}: ${esc(n.nom)}</b> (${esc(det)})${n.motiu ? `<div class="why">${esc(n.motiu)}</div>` : ''}</span></label>`);
+    });
+    box.innerHTML = (files.length ? files.join('') + '<div class="row-actions"><button class="btn primary" type="button" id="aplica">Aplica els marcats</button><span class="hint">No es desa res fins que confirmis a baix.</span></div>' : '<div class="hint">Claude no hi ha vist cap canvi clar.</div>')
+      + (dubtes.length ? `<div class="hint">Dubtes: ${dubtes.map(esc).join(' · ')}</div>` : '');
+  }
+  $('proposals').addEventListener('click', (e) => {
+    if (e.target.id !== 'aplica' || !S.propostes) return;
+    const { r, claus } = S.propostes;
+    let n = 0;
+    document.querySelectorAll('[data-pc]').forEach((cb) => {
+      if (!cb.checked) return;
+      const c = r.canvis[Number(cb.dataset.pc)]; const it = S.items.get(claus[c.k]); if (!it) return;
+      if (it.zona === 'congelador') { if (c.racions != null && Number.isFinite(Number(c.racions))) { edita(it, 'racions', Math.max(0, Number(c.racions))); n++; } }
+      else {
+        if (c.quantitat != null) { edita(it, 'quantitat', String(c.quantitat)); n++; }
+        if (typeof c.sacaba === 'boolean') { edita(it, 'sacaba', c.sacaba); n++; }
+      }
+    });
+    document.querySelectorAll('[data-pn]').forEach((cb) => {
+      if (!cb.checked) return;
+      const x = r.nous[Number(cb.dataset.pn)];
+      if (x.zona === 'congelador') S.nous.push({ k: kNou++, zona: 'congelador', nom: String(x.nom), grup: TIPUS.includes(x.tipus) ? x.tipus : 'Altres', racions: Math.max(1, Number(x.racions) || 1) });
+      else S.nous.push({ k: kNou++, zona: x.zona, nom: String(x.nom), grup: CATEGORIES.includes(x.categoria) ? x.categoria : 'Altres', quantitat: String(x.quantitat || '?') });
+      n++;
+    });
+    S.propostes = null; renderPropostes();
+    $('assistText').value = ''; fotos = []; $('fotos').value = '';
+    $('assistInfo').textContent = n ? `He aplicat ${n} canvi${n === 1 ? '' : 's'}. Revisa'ls i desa.` : 'No he aplicat res.';
+    render();
+  });
+  $('fotos').addEventListener('change', (e) => {
+    fotos = [...e.target.files];
+    $('assistInfo').textContent = fotos.length ? `${fotos.length} foto${fotos.length === 1 ? '' : 's'} preparada${fotos.length === 1 ? '' : 'es'}.` : '';
+  });
+
+  // ── Arrencada ──────────────────────────────────────────
+  render();
+  const usa = (n) => (window.claude && window.claude.use ? window.claude.use(n).catch(() => null) : Promise.resolve(null));
+  usa('sample').then(async (s) => {
+    sample = s;
+    if (!s) { $('assist').hidden = true; return; }
+    const lim = await s.limits().catch(() => null);
+    if (lim && lim.images) {
+      $('fotoLabel').hidden = false;
+      $('fotos').accept = (lim.images.mediaTypes || []).join(',') || 'image/*';
+    }
+  });
+  usa('db').then(async (d) => {
+    db = d;
+    if (!d) return;
+    try {
+      const snap = await d.doc('repassos/ultim').get();
+      if (snap.exists) {
+        const x = snap.data() || {};
+        S.ultimRepas = x.data || null;
+        if (x.fruita && !Object.keys(S.fruita).length) { /* la fruita es torna a preguntar cada setmana */ }
+        if (S.tab === 'resum') render();
+      }
+    } catch (e) { /* sense historial */ }
+  });
+  usa('mcp').then((m) => { mcp = m; carrega(); });
+})();
+</script>
