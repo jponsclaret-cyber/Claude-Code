@@ -108,6 +108,9 @@ main.wrap { padding-block: 16px 120px; display: grid; gap: 16px; }
 .item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 10px 14px; border-top: 1px solid var(--line); align-items: center; }
 .item.dirty { background: var(--warn-soft); }
 .item.saved { background: var(--accent-soft); }
+.item.error { background: var(--bad-soft); }
+.item .estat { font-size: .75rem; color: var(--muted); }
+.item.error .estat { color: var(--bad); }
 .item .name { min-width: 0; }
 .item .name strong { font-weight: 700; overflow-wrap: anywhere; }
 .item .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 3px; }
@@ -124,6 +127,7 @@ main.wrap { padding-block: 16px 120px; display: grid; gap: 16px; }
 .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
 .stepper button { border: 0; background: none; width: 38px; height: 36px; font-size: 1.15rem; font-weight: 700; color: var(--frost); }
 .stepper .val { min-width: 2.6em; text-align: center; font-family: var(--f-data); }
+.stepper .qtext { width: auto; min-width: 4.5em; max-width: 9em; padding: 0 6px; font-size: .85rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .add { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); background: var(--bg); }
 .add .fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 8px; }
 .add input, .add select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--surface); }
@@ -207,8 +211,8 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
 
 <div class="savebar" id="savebar">
   <div class="wrap">
-    <div class="grow"><strong id="pendents">Cap canvi pendent</strong><div class="hint" id="pendentsSub">Toca una quantitat o «S'acaba» per corregir-la.</div></div>
-    <button class="btn primary" id="desa" type="button" disabled>Revisa i desa</button>
+    <div class="grow"><strong id="pendents">Tot desat ✓</strong><div class="hint" id="pendentsSub">Cada canvi es desa sol a Notion.</div></div>
+    <button class="btn primary" id="desa" type="button" hidden>Torna-ho a provar</button>
   </div>
 </div>
 
@@ -356,7 +360,8 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
         const it = zona === 'congelador' ? deCongelador(row) : deRebost(row, zona);
         if (!it.id) continue;
         const vell = prev.get(it.id);
-        if (vell && vell.edit && Object.keys(vell.edit).length) it.edit = vell.edit;
+        if (vell && vell.edit && Object.keys(vell.edit).length) { it.edit = vell.edit; it.errorDesar = vell.errorDesar || ''; }
+        if (vell && vell.desat) it.desat = true;
         nous.set(it.id, it);
       }
     });
@@ -380,11 +385,17 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const rac = Number(row['Racions']);
     return { id: row.url, zona: 'congelador', nom: row['Què és'] || '(sense nom)', grup: row['Tipus'] || 'Altres', notes: row['Notes'] || '', data: row['date:Data:start'] || '', orig: { racions: Number.isFinite(rac) ? rac : 0 }, edit: {} };
   }
+  // «3 bricks» → {n: 3, unitat: 'bricks'}; «mig paquet» → null
+  function quantitatNumerica(q) {
+    const m = String(q || '').match(/^\s*(\d+(?:[.,]\d+)?)\s*(.*)$/);
+    return m ? { n: Number(m[1].replace(',', '.')), unitat: m[2].trim(), decimal: /[.,]/.test(m[1]) } : null;
+  }
   const valor = (it, camp) => (camp in it.edit ? it.edit[camp] : it.orig[camp]);
   const brut = (it) => Object.keys(it.edit).some((k) => it.edit[k] !== it.orig[k]);
   function edita(it, camp, v) {
     if (v === it.orig[camp]) delete it.edit[camp]; else it.edit[camp] = v;
-    it.desat = false;
+    it.desat = false; it.errorDesar = '';
+    programaDesa(it);
   }
 
   // ── Estat i avisos ─────────────────────────────────────
@@ -445,7 +456,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       html += `<div class="group"><h3>${esc(g)} · <span class="num">${llista.length}</span></h3>${llista.map(renderItem).join('')}</div>`;
     }
     const nousZona = S.nous.filter((n) => n.zona === zona);
-    if (nousZona.length) html += `<div class="group"><h3>Nous (encara no desats)</h3>${nousZona.map((n) => `<div class="item dirty"><div class="name"><strong>${esc(n.nom)}</strong><div class="meta"><span class="tag">${esc(n.grup)}</span></div></div><div class="ctrl"><span class="num">${esc(zona === 'congelador' ? n.racions + ' rac.' : n.quantitat)}</span><button class="iconbtn" type="button" data-treu-nou="${n.k}">Treu</button></div></div>`).join('')}</div>`;
+    if (nousZona.length) html += `<div class="group"><h3>Afegint a Notion</h3>${nousZona.map((n) => `<div class="item ${n.estat === 'error' ? 'error' : 'dirty'}"><div class="name"><strong>${esc(n.nom)}</strong><div class="meta"><span class="tag">${esc(n.grup)}</span></div><div class="estat">${n.estat === 'error' ? '⚠️ ' + esc(n.error || 'No s\'ha pogut afegir') : 'Desant…'}</div></div><div class="ctrl"><span class="num">${esc(zona === 'congelador' ? n.racions + ' rac.' : n.quantitat)}</span>${n.estat === 'error' ? `<button class="iconbtn" type="button" data-reintenta-nou="${n.k}">Torna-ho a provar</button><button class="iconbtn" type="button" data-treu-nou="${n.k}">Treu</button>` : ''}</div></div>`).join('')}</div>`;
     if (!items.length && !S.carregant) html += `<div class="group"><div class="empty">${f || S.nomesAcaba ? 'Cap producte coincideix amb el filtre.' : 'No hi ha res apuntat aquí.'}</div></div>`;
     html += renderAfegir(zona);
     return html;
@@ -467,10 +478,15 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       const q = valor(it, 'quantitat');
       const perComprovar = /per comprovar/i.test(q);
       if (perComprovar && !('quantitat' in it.edit)) tags.push('<span class="tag check">per comprovar</span>');
-      ctrl = `<input class="qty${perComprovar ? ' check' : ''}" type="text" data-q="${esc(it.id)}" id="q-${esc(it.id.slice(-12))}" value="${esc(q)}" aria-label="Quantitat de ${esc(it.nom)}">
+      const num = quantitatNumerica(q);
+      const camp = num && !it.textLliure
+        ? `<div class="stepper" aria-label="Quantitat"><button type="button" data-qpas="-1" data-id="${esc(it.id)}" aria-label="Menys">−</button><button type="button" class="val qtext" data-qtext="${esc(it.id)}" title="Toca per escriure-ho">${esc(q)}</button><button type="button" data-qpas="1" data-id="${esc(it.id)}" aria-label="Més">+</button></div>`
+        : `<input class="qty${perComprovar ? ' check' : ''}" type="text" data-q="${esc(it.id)}" id="q-${esc(it.id.slice(-12))}" value="${esc(q)}" aria-label="Quantitat de ${esc(it.nom)}">`;
+      ctrl = `${camp}
         <button class="ends" type="button" data-ends="${esc(it.id)}" aria-pressed="${valor(it, 'sacaba')}">S'acaba</button>`;
     }
-    return `<div class="item${d ? ' dirty' : it.desat ? ' saved' : ''}"><div class="name"><strong>${esc(it.nom)}</strong>${tags.length ? `<div class="meta">${tags.join('')}</div>` : ''}</div><div class="ctrl">${ctrl}</div>${notesSenseReserves ? `<div class="notes">${esc(notesSenseReserves)}</div>` : ''}</div>`;
+    const estat = it.errorDesar ? `<div class="estat">⚠️ ${esc(it.errorDesar)}</div>` : (d || it.desant) ? '<div class="estat">Desant…</div>' : it.desat ? '<div class="estat">✓ Desat</div>' : '';
+    return `<div class="item${it.errorDesar ? ' error' : (d || it.desant) ? ' dirty' : it.desat ? ' saved' : ''}"><div class="name"><strong>${esc(it.nom)}</strong>${tags.length ? `<div class="meta">${tags.join('')}</div>` : ''}${estat}</div><div class="ctrl">${ctrl}</div>${notesSenseReserves ? `<div class="notes">${esc(notesSenseReserves)}</div>` : ''}</div>`;
   }
   function renderAfegir(zona) {
     const opts = (zona === 'congelador' ? TIPUS : CATEGORIES).map((c) => `<option>${esc(c)}</option>`).join('');
@@ -522,11 +538,13 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
         <div class="row-actions"><button class="btn" type="button" id="copia">Copia el resum</button><span class="hint" id="copiaInfo">${esc(ultim)}</span></div></div>`;
   }
   function renderSavebar() {
-    const canvis = [...S.items.values()].filter(brut).length + S.nous.length;
-    const fruita = Object.keys(S.fruita).length > 0;
-    $('pendents').textContent = canvis ? `${canvis} canvi${canvis === 1 ? '' : 's'} per desar` : 'Cap canvi pendent';
-    $('pendentsSub').textContent = canvis ? 'Es desaran a Notion quan confirmis.' : fruita ? 'Pots desar el repàs amb la fruita.' : 'Toca una quantitat o «S\'acaba» per corregir-la.';
-    $('desa').disabled = !canvis && !fruita;
+    const pend = temporitzadors.size + desantN + S.nous.filter((n) => n.estat === 'desant').length;
+    const ambError = [...S.items.values()].filter((it) => it.errorDesar);
+    const nousError = S.nous.filter((n) => n.estat === 'error');
+    const errs = ambError.length + nousError.length;
+    if (pend) { $('pendents').textContent = 'Desant a Notion…'; $('pendentsSub').textContent = 'No tanquis la pàgina fins que digui «Tot desat».'; $('desa').hidden = true; }
+    else if (errs) { $('pendents').textContent = `${errs} canvi${errs === 1 ? '' : 's'} no s'ha${errs === 1 ? '' : 'n'} pogut desar`; $('pendentsSub').textContent = (ambError[0] && ambError[0].errorDesar) || (nousError[0] && nousError[0].error) || ''; $('desa').hidden = false; }
+    else { $('pendents').textContent = 'Tot desat ✓'; $('pendentsSub').textContent = 'Cada canvi es desa sol a Notion.'; $('desa').hidden = true; }
   }
 
   // ── Interacció ─────────────────────────────────────────
@@ -537,18 +555,32 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   $('panel').addEventListener('click', (e) => {
     const ends = e.target.closest('[data-ends]');
     if (ends) { const it = S.items.get(ends.dataset.ends); edita(it, 'sacaba', !valor(it, 'sacaba')); render(); return; }
+    const qp = e.target.closest('[data-qpas]');
+    if (qp) {
+      const it = S.items.get(qp.dataset.id); const x = quantitatNumerica(valor(it, 'quantitat')); if (!x) return;
+      const pas = x.decimal || x.n < 1 ? 0.5 : 1;
+      const n = Math.max(0, Math.round((x.n + pas * Number(qp.dataset.qpas)) * 10) / 10);
+      edita(it, 'quantitat', `${String(n).replace('.', ',')}${x.unitat ? ' ' + x.unitat : ''}`);
+      if (n === 0 && !valor(it, 'sacaba')) edita(it, 'sacaba', true);
+      if (n > 0 && Number(qp.dataset.qpas) > 0 && valor(it, 'sacaba')) edita(it, 'sacaba', false);
+      render(); return;
+    }
+    const qt = e.target.closest('[data-qtext]');
+    if (qt) { const it = S.items.get(qt.dataset.qtext); it.textLliure = true; render(); const inp = document.querySelector(`[data-q="${CSS.escape(it.id)}"]`); if (inp) { inp.focus(); inp.select(); } return; }
     const rac = e.target.closest('[data-rac]');
     if (rac) { const it = S.items.get(rac.dataset.id); edita(it, 'racions', Math.max(0, valor(it, 'racions') + Number(rac.dataset.rac))); render(); return; }
     const fr = e.target.closest('[data-fruit]');
-    if (fr) { const f = fr.dataset.fruit; if (S.fruita[f] === fr.dataset.v) delete S.fruita[f]; else S.fruita[f] = fr.dataset.v; render(); return; }
+    if (fr) { const f = fr.dataset.fruit; if (S.fruita[f] === fr.dataset.v) delete S.fruita[f]; else S.fruita[f] = fr.dataset.v; programaResum(); render(); return; }
+    const rn = e.target.closest('[data-reintenta-nou]');
+    if (rn) { const n = S.nous.find((x) => String(x.k) === rn.dataset.reintentaNou); if (n) creaNou(n); return; }
     const tn = e.target.closest('[data-treu-nou]');
     if (tn) { S.nous = S.nous.filter((n) => String(n.k) !== tn.dataset.treuNou); render(); return; }
     if (e.target.id === 'copia') copia();
   });
   $('panel').addEventListener('change', (e) => {
-    if (e.target.matches('[data-q]')) { const it = S.items.get(e.target.dataset.q); edita(it, 'quantitat', e.target.value.trim()); render(); }
+    if (e.target.matches('[data-q]')) { const it = S.items.get(e.target.dataset.q); it.textLliure = false; edita(it, 'quantitat', e.target.value.trim()); render(); }
     if (e.target.id === 'nomesAcaba') { S.nomesAcaba = e.target.checked; render(); }
-    if (e.target.id === 'fruitaNota') { S.fruitaNota = e.target.value.trim(); renderSavebar(); }
+    if (e.target.id === 'fruitaNota') { S.fruitaNota = e.target.value.trim(); programaResum(); }
   });
   let cercaT;
   $('panel').addEventListener('input', (e) => {
@@ -567,11 +599,11 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     if (zona === 'congelador') {
       const n = Number(q.replace(',', '.'));
       if (!Number.isFinite(n) || n <= 0) { f.q.setCustomValidity('Posa un nombre de racions'); f.q.reportValidity(); return; }
-      S.nous.push({ k: kNou++, zona, nom, grup, racions: n });
+      creaNou({ k: kNou++, zona, nom, grup, racions: n });
     } else {
-      S.nous.push({ k: kNou++, zona, nom, grup, quantitat: q });
+      creaNou({ k: kNou++, zona, nom, grup, quantitat: q });
     }
-    render();
+    f.reset();
   });
   async function copia() {
     const t = textResum();
@@ -584,71 +616,69 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   }
   $('recarrega').addEventListener('click', () => carrega());
 
-  // ── Desar ──────────────────────────────────────────────
-  function feinesPendents() {
-    const f = [];
-    for (const it of S.items.values()) {
-      if (!brut(it)) continue;
-      const props = {}; const desc = [];
-      if ('quantitat' in it.edit && it.edit.quantitat !== it.orig.quantitat) { props['Quantitat'] = it.edit.quantitat; desc.push(`quantitat «${it.edit.quantitat || '—'}»`); }
-      if ('sacaba' in it.edit && it.edit.sacaba !== it.orig.sacaba) { props["S'acaba"] = it.edit.sacaba ? '__YES__' : '__NO__'; desc.push(it.edit.sacaba ? "marca «S'acaba»" : "treu «S'acaba»"); }
-      if ('racions' in it.edit && it.edit.racions !== it.orig.racions) { props['Racions'] = it.edit.racions; desc.push(`${it.orig.racions} → ${it.edit.racions} racions`); }
-      f.push({ tipus: 'update', it, props, text: `${it.nom}: ${desc.join(', ')}` });
-    }
-    for (const n of S.nous) {
-      const today = new Date(); const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      const props = n.zona === 'congelador'
-        ? { 'Què és': n.nom, Racions: n.racions, Tipus: n.grup, 'date:Data:start': iso, 'date:Data:is_datetime': 0 }
-        : { Producte: n.nom, Quantitat: n.quantitat, Lloc: n.zona === 'nevera' ? 'Nevera' : 'Rebost', Categoria: n.grup, "S'acaba": '__NO__' };
-      f.push({ tipus: 'nou', n, props, text: `Nou a ${n.zona}: ${n.nom} (${n.zona === 'congelador' ? n.racions + ' rac.' : n.quantitat})` });
-    }
-    return f;
+  // ── Desat automàtic ────────────────────────────────────
+  // Cada canvi es desa sol a Notion uns instants després de fer-lo.
+  const temporitzadors = new Map();
+  let desantN = 0;
+  const editant = () => { const a = document.activeElement; return !!(a && $('panel').contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+  const renderSuau = () => { if (editant()) { renderTabs(); renderSavebar(); } else render(); };
+  function programaDesa(it, ms = 600) {
+    clearTimeout(temporitzadors.get(it.id));
+    temporitzadors.set(it.id, setTimeout(() => desaItem(it), ms));
+    renderSavebar();
   }
-  let feinesSheet = [];
-  $('desa').addEventListener('click', () => {
-    feinesSheet = feinesPendents();
-    const fruita = Object.keys(S.fruita).length > 0;
-    $('sheetSub').textContent = feinesSheet.length
-      ? `Es desaran ${feinesSheet.length} canvi${feinesSheet.length === 1 ? '' : 's'} a Notion.${db ? ' També guardo el resum del repàs (amb la fruita) perquè Claude el pugui llegir.' : ''}`
-      : (db && fruita ? 'No hi ha canvis a Notion. Guardo el resum del repàs amb la fruita.' : 'No hi ha res per desar.');
-    $('sheetList').innerHTML = feinesSheet.map((f, i) => `<div><span>${esc(f.text)}</span><span class="st wait" id="st-${i}">pendent</span></div>`).join('');
-    $('sheetGo').disabled = false; $('sheetGo').textContent = 'Desa-ho';
-    $('sheet').hidden = false;
-  });
-  $('sheetClose').addEventListener('click', () => { $('sheet').hidden = true; });
-  $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) $('sheet').hidden = true; });
-  $('sheetGo').addEventListener('click', async () => {
-    const go = $('sheetGo'); go.disabled = true; go.textContent = 'Desant…';
-    let errors = 0;
-    for (let i = 0; i < feinesSheet.length; i++) {
-      const f = feinesSheet[i]; const st = $('st-' + i);
-      st.className = 'st wait'; st.textContent = 'desant…';
-      try {
-        if (f.tipus === 'update') {
-          await mcp.callTool(NOTION, 'notion-update-page', { page_id: f.it.id, command: 'update_properties', properties: f.props, allow_async: false });
-          f.it.orig = { ...f.it.orig, ...f.it.edit }; f.it.edit = {}; f.it.desat = true;
-        } else {
-          await mcp.callTool(NOTION, 'notion-create-pages', { parent: { type: 'data_source_id', data_source_id: (f.n.zona === 'congelador' ? DS.congelador : DS.rebost).replace('collection://', '') }, pages: [{ properties: f.props }], allow_async: false });
-          S.nous = S.nous.filter((x) => x !== f.n);
-        }
-        st.className = 'st ok'; st.textContent = 'desat';
-      } catch (e) {
-        errors++; st.className = 'st err'; st.textContent = 'error';
-        st.title = textError(e, 'desar');
-        if (['server_unavailable', 'upstream_error', 'cancelled'].includes(e && e.code)) st.textContent = 'no sé si s\'ha desat';
-      }
-    }
-    if (db) {
+  async function desaItem(it) {
+    temporitzadors.delete(it.id);
+    if (!brut(it)) { renderSavebar(); return; }
+    if (it.desant) { programaDesa(it, 400); return; }
+    if (!mcp) { it.errorDesar = 'Sense connexió amb Notion.'; renderSuau(); return; }
+    const ed = { ...it.edit }; const props = {};
+    if ('quantitat' in ed) props['Quantitat'] = ed.quantitat;
+    if ('sacaba' in ed) props["S'acaba"] = ed.sacaba ? '__YES__' : '__NO__';
+    if ('racions' in ed) props['Racions'] = ed.racions;
+    it.desant = true; desantN++; renderSavebar();
+    try {
+      await mcp.callTool(NOTION, 'notion-update-page', { page_id: it.id, command: 'update_properties', properties: props, allow_async: false });
+      for (const k of Object.keys(ed)) { it.orig[k] = ed[k]; if (it.edit[k] === ed[k]) delete it.edit[k]; }
+      it.desat = true; it.errorDesar = '';
+      programaResum();
+    } catch (e) {
+      it.errorDesar = textError(e, 'desar');
+    } finally { it.desant = false; desantN--; }
+    if (brut(it) && !it.errorDesar) programaDesa(it, 200);
+    renderSuau();
+  }
+  async function creaNou(n) {
+    if (!S.nous.includes(n)) S.nous.push(n);
+    n.estat = 'desant'; n.error = ''; renderSuau();
+    const today = new Date(); const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const props = n.zona === 'congelador'
+      ? { 'Què és': n.nom, Racions: n.racions, Tipus: n.grup, 'date:Data:start': iso, 'date:Data:is_datetime': 0 }
+      : { Producte: n.nom, Quantitat: n.quantitat, Lloc: n.zona === 'nevera' ? 'Nevera' : 'Rebost', Categoria: n.grup, "S'acaba": '__NO__' };
+    try {
+      if (!mcp) throw new Error('Sense connexió amb Notion.');
+      await mcp.callTool(NOTION, 'notion-create-pages', { parent: { type: 'data_source_id', data_source_id: (n.zona === 'congelador' ? DS.congelador : DS.rebost).replace('collection://', '') }, pages: [{ properties: props }], allow_async: false });
+      S.nous = S.nous.filter((x) => x !== n);
+      clearTimeout(creaNou.t); creaNou.t = setTimeout(() => { if (!editant()) carrega(); }, 1200);
+    } catch (e) { n.estat = 'error'; n.error = textError(e, 'afegir'); }
+    renderSuau();
+  }
+  let resumT;
+  function programaResum() {
+    if (!db) return;
+    clearTimeout(resumT);
+    resumT = setTimeout(async () => {
       try {
         const l = llistaCompra();
         await db.doc('repassos/ultim').set({ data: new Date().toISOString(), sacaba: l.acaben, fruita: S.fruita, fruitaNota: S.fruitaNota, platsCongelador: l.plats, perComprovar: l.perComprovar, resum: textResum() });
         S.ultimRepas = new Date().toISOString();
-      } catch (e) { errors++; $('sheetSub').textContent = 'No he pogut guardar el resum del repàs (Notion sí que s\'ha desat).'; }
-    }
-    go.textContent = errors ? `Fet amb ${errors} error${errors === 1 ? '' : 's'}` : 'Desat';
-    if (!errors) $('sheetSub').textContent = 'Tot desat. Torno a llegir Notion per comprovar-ho.';
+      } catch (e) { /* el resum és secundari */ }
+    }, 2000);
+  }
+  $('desa').addEventListener('click', () => {
+    for (const it of S.items.values()) if (it.errorDesar) { it.errorDesar = ''; programaDesa(it, 0); }
+    for (const n of S.nous.filter((x) => x.estat === 'error')) creaNou(n);
     render();
-    if (feinesSheet.length) setTimeout(() => { carrega(); }, 600);
   });
 
   // ── Claude ─────────────────────────────────────────────
@@ -740,13 +770,13 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     document.querySelectorAll('[data-pn]').forEach((cb) => {
       if (!cb.checked) return;
       const x = r.nous[Number(cb.dataset.pn)];
-      if (x.zona === 'congelador') S.nous.push({ k: kNou++, zona: 'congelador', nom: String(x.nom), grup: TIPUS.includes(x.tipus) ? x.tipus : 'Altres', racions: Math.max(1, Number(x.racions) || 1) });
-      else S.nous.push({ k: kNou++, zona: x.zona, nom: String(x.nom), grup: CATEGORIES.includes(x.categoria) ? x.categoria : 'Altres', quantitat: String(x.quantitat || '?') });
+      if (x.zona === 'congelador') creaNou({ k: kNou++, zona: 'congelador', nom: String(x.nom), grup: TIPUS.includes(x.tipus) ? x.tipus : 'Altres', racions: Math.max(1, Number(x.racions) || 1) });
+      else creaNou({ k: kNou++, zona: x.zona, nom: String(x.nom), grup: CATEGORIES.includes(x.categoria) ? x.categoria : 'Altres', quantitat: String(x.quantitat || '?') });
       n++;
     });
     S.propostes = null; renderPropostes();
     $('assistText').value = ''; fotos = []; $('fotos').value = '';
-    $('assistInfo').textContent = n ? `He aplicat ${n} canvi${n === 1 ? '' : 's'}. Revisa'ls i desa.` : 'No he aplicat res.';
+    $('assistInfo').textContent = n ? `He aplicat ${n} canvi${n === 1 ? '' : 's'} i es desen sols a Notion.` : 'No he aplicat res.';
     render();
   });
   $('fotos').addEventListener('change', (e) => {
