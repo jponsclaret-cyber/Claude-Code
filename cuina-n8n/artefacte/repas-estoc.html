@@ -1141,7 +1141,16 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
           <label class="toggle"><input type="checkbox" id="mNou" ${m.platNou ? 'checked' : ''}> Proposa un plat nou</label>
           <textarea id="mComentari" placeholder="Alguna cosa especial aquesta setmana? (p. ex. «dijous no dinem a casa»)" style="width:100%;min-height:64px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface)">${esc(m.comentari)}</textarea>
         </div>
-        <div class="row-actions"><button class="btn primary" type="button" id="mProposa">Fes el menú</button><span class="hint">Claude farà servir l'estoc d'aquesta pàgina i les teves llistes del Cookidoo.</span></div>
+        <div class="row-actions"><button class="btn primary" type="button" id="mSegonPla">Fes-ho tot en segon pla</button><button class="btn" type="button" id="mProposa">Fes el menú aquí</button></div>
+        <div class="hint"><b>En segon pla</b>: pots tancar l'app; Claude ho fa al núvol i et sona una notificació quan acaba (uns 10-15 minuts). <b>Aquí</b>: veus la proposta abans d'aplicar-la, però has de deixar l'app oberta.</div>
+        <div class="chlist" style="margin-top:4px">
+          <label class="toggle"><input type="checkbox" data-fer="setmana" ${m.fer.setmana ? 'checked' : ''}> Posar-ho a «Mi semana»</label>
+          <label class="toggle"><input type="checkbox" data-fer="llista" ${m.fer.llista ? 'checked' : ''}> Refer la llista de la compra (esborra l'actual)</label>
+          <label class="toggle"><input type="checkbox" data-fer="carro" ${m.fer.carro ? 'checked' : ''}> Omplir el carro del Mercadona</label>
+          <label class="toggle"><input type="checkbox" data-fer="notion" ${m.fer.notion ? 'checked' : ''}> Reserves 📌 i sobres ⏳ a Notion</label>
+          <label class="toggle"><input type="checkbox" data-fer="calendari" ${m.fer.calendari ? 'checked' : ''}> Avisos de descongelar i de la Lupe</label>
+        </div>
+        ${m.encarregat ? `<div class="notice">✓ Encarregat a les ${esc(m.encarregat)}. Pots tancar l'app: et sonarà una notificació quan acabi, i el resum el veuràs a l'app Claude.</div>` : ''}
         ${m.error ? `<div class="notice bad">${esc(m.error)}</div>` : ''}
       </div>`;
     }
@@ -1181,6 +1190,9 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
 
   $('panel').addEventListener('click', (e) => {
     const id = e.target.id;
+    if (id === 'mSegonPla') {
+      encarregaSegonPla(); return;
+    }
     if (id === 'mProposa') {
       const m = S.menu;
       m.dilluns = ($('mDilluns') && $('mDilluns').value) || m.dilluns;
@@ -1206,6 +1218,33 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       S.menu.fase = 'config'; S.menu.proposta = null; S.menu.passos = []; render();
     }
   });
+  const TASCA_SEGON_PLA = 'trig_01Ua7Fdg2eiVgAN7utg7fuJ6';
+  async function encarregaSegonPla(mode = 'real') {
+    const m = S.menu;
+    m.dilluns = ($('mDilluns') && $('mDilluns').value) || m.dilluns;
+    m.persones = Math.max(1, Math.min(8, Number($('mPersones') && $('mPersones').value) || 4));
+    m.findeCasa = !!($('mFinde') && $('mFinde').checked);
+    m.platNou = !!($('mNou') && $('mNou').checked);
+    m.comentari = (($('mComentari') && $('mComentari').value) || '').trim();
+    m.error = ''; m.encarregat = '';
+    const btn = $('mSegonPla'); if (btn) { btn.disabled = true; btn.textContent = 'Encarregant…'; }
+    const dades = {
+      setmana_dilluns: m.dilluns, persones: m.persones, dinars_cap_de_setmana_a_casa: m.findeCasa, plat_nou: m.platNou,
+      comentari: m.comentari, fruita: S.fruita, fruita_nota: S.fruitaNota, fer: m.fer, mode,
+    };
+    try {
+      if (!mcp) throw new Error('Aquesta vista no pot fer servir els connectors.');
+      await mcp.callTool('Claude Code Remote', 'fire_trigger', { trigger_id: TASCA_SEGON_PLA, text: 'Dades d\'aquesta execució:\n' + JSON.stringify(dades, null, 1) });
+      m.encarregat = new Date().toLocaleTimeString('ca-ES', { hour: '2-digit', minute: '2-digit' });
+      if (db) db.doc('menus/encarregat').set({ data: new Date().toISOString(), dades: JSON.stringify(dades) }).catch(() => {});
+    } catch (e) {
+      const c = e && e.code;
+      m.error = c === 'server_not_connected' ? 'Aquesta pàgina no pot encarregar feines a Claude (falta el connector «Claude Code Remote»).'
+        : (c === 'not_in_manifest' || c === 'approval_required') ? 'Cal que permetis a aquesta pàgina encarregar feines a Claude: torna-ho a tocar i accepta-ho.'
+        : `No s'ha pogut encarregar: ${String((e && e.message) || e).slice(0, 200)}${c ? ` [${c}]` : ''}`;
+    }
+    render();
+  }
   $('panel').addEventListener('change', (e) => {
     const f = e.target.closest('[data-fer]');
     if (f) S.menu.fer[f.dataset.fer] = f.checked;
