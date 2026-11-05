@@ -865,48 +865,132 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     ].map((x) => '- ' + x).join('\n');
   }
 
+  // Reintenta una vegada els errors de connexió (lectures i peticions a Claude)
+  async function ambReintent(fn) {
+    try { return await fn(); }
+    catch (e) {
+      const transitori = e && (e.retryable || ['upstream_error', 'server_unavailable'].includes(e.code) || /quiet|timeout|timed out|network/i.test(String(e.message || '')));
+      if (!transitori) throw e;
+      await new Promise((ok) => setTimeout(ok, 2000 + Math.random() * 1500));
+      return fn();
+    }
+  }
+  async function etapa(nom, fn) {
+    logMenu(nom + '…');
+    try { return await ambReintent(fn); } catch (e) { if (e && typeof e === 'object') e.etapa = nom; throw e; }
+  }
+  // Mostra que Claude està escrivint (i manté viva la connexió mentre respon)
+  function seguiment(nom) {
+    let ultim = 0;
+    return ({ text }) => {
+      const ara = Date.now(); if (ara - ultim < 1500) return; ultim = ara;
+      S.menu.log[S.menu.log.length - 1] = `${nom}… (${text.length} caràcters)`;
+      if (S.tab === 'menu') render();
+    };
+  }
+  function platsDe(p) {
+    const out = [];
+    for (const d of p.dies || []) for (const apat of ['dinar', 'sopar']) (d[apat] || []).forEach((r, i) => { if (r && r.id) out.push({ d, apat, i, r }); });
+    return out;
+  }
+  async function detalls(ids) {
+    const falten = [...new Set(ids.filter(Boolean))].filter((id) => !S.menu.cache[id]);
+    for (let i = 0; i < falten.length; i += 20) {
+      const r = await n8n('cookidoo', 'receptes', { ids: falten.slice(i, i + 20), variants: true });
+      for (const x of r.resultat || []) S.menu.cache[x.id] = x;
+    }
+  }
+  const racionsDe = (x) => { const m = String((x && x.racions) || '').match(/\d+/); return m ? Number(m[0]) : null; };
+  function problemes(p) {
+    const out = [];
+    for (const x of platsDe(p)) {
+      const det = S.menu.cache[x.r.id];
+      if (!det) { out.push({ ...x, motiu: 'no he pogut llegir la recepta' }); continue; }
+      if (det.llegum !== false) { out.push({ ...x, motiu: Array.isArray(det.llegum) ? 'porta llegum: ' + det.llegum.join(', ') : 'no sé si porta llegum' }); continue; }
+      const rac = racionsDe(det);
+      if (x.r.congela && rac && rac < 6 && (det.variants || []).length) out.push({ ...x, motiu: `és de ${rac} racions i s'hauria de fer de 6` });
+    }
+    return out;
+  }
+  const textLlistesDe = (col) => {
+    const llistes = (col.resultat || []).filter((l) => /men[uú]|dinar|sopar 1|sopar 2|croquet/i.test(l.titol));
+    return (llistes.length ? llistes : col.resultat || []).map((l) => `## ${l.titol}\n` + l.receptes.map((r) => `${r.id} | ${r.titol}${r.tempsTotalMin ? ` | ${r.tempsTotalMin} min` : ''}`).join('\n')).join('\n\n').slice(0, 45000);
+  };
+
   async function proposaMenu() {
     const m = S.menu;
     m.fase = 'pensant'; m.log = []; m.error = ''; m.proposta = null; render();
     try {
       if (!mcp) throw new Error('Aquesta vista no pot fer servir els connectors.');
       if (!sample) throw new Error('Claude no està disponible en aquesta vista.');
-      const lim = await sample.limits().catch(() => null);
-      if (!lim || !lim.tools) throw new Error('Aquesta vista de Claude no admet eines; obre la pàgina a claude.ai.');
-      logMenu('Llegint les teves llistes del Cookidoo…');
-      const col = await n8n('cookidoo', 'colleccions', {});
-      const llistes = (col.resultat || []).filter((l) => /men[uú]|dinar|sopar|finde|croquet|arr[oò]s|paella/i.test(l.titol));
-      const textLlistes = (llistes.length ? llistes : col.resultat || []).map((l) => `## ${l.titol}\n` + l.receptes.map((r) => `${r.id} | ${r.titol}${r.tempsTotalMin ? ` | ${r.tempsTotalMin} min` : ''}`).join('\n')).join('\n\n').slice(0, 60000);
+      const col = await etapa('Llegint les teves llistes del Cookidoo', () => n8n('cookidoo', 'colleccions', {}));
+      const textLlistes = textLlistesDe(col);
       const { out, claus } = compactaEstoc();
       m.claus = claus; // les claus k de les reserves es fixen ara
       const dies = Array.from({ length: 7 }, (_, i) => mesDies(m.dilluns, i));
       const fruita = FRUITES.map((f) => `${f}: ${S.fruita[f] === 'no' ? 'no en queda' : S.fruita[f] === 'poca' ? 'poca' : S.fruita[f] === 'prou' ? 'prou' : 'no ho sé'}`).join('; ');
+      const regles = reglesCasa(m).replace("Comprova SEMPRE cada recepta amb l'eina «receptes»: «llegum» ha de ser false.", 'Després la pàgina comprovarà els ingredients de cada recepta.').replace(/\(cerca'l amb «cercar_receptes»\)/, '');
       const prompt = [
         `Ets el cuiner de casa d'en Jimix (Thermomix + Cookidoo). Fes el menú de la setmana del ${nomDia(dies[0])} al ${nomDia(dies[6])} (dies: ${dies.join(', ')}). Escriu en català.`,
-        'REGLES DE CASA:', reglesCasa(m),
+        'REGLES DE CASA:', regles,
         m.comentari ? `\nCOMENTARI D'EN JIMIX PER A AQUESTA SETMANA: ${m.comentari}` : '',
         '\nESTOC ACTUAL (k = clau per a les reserves):', JSON.stringify(out),
         `\nFRUITA: ${fruita}`,
-        '\nLLISTES DEL COOKIDOO (rID | títol | temps):', textLlistes,
-        '\nCOM HO HAS DE FER: tria candidats, comprova\'ls amb l\'eina «receptes» (llegum false, racions i variants) en una o dues crides, i ajusta. Després respon NOMÉS amb un objecte JSON:',
+        '\nLLISTES DEL COOKIDOO (rID | títol | temps). Tria NOMÉS receptes d\'aquestes llistes, amb el rID exacte:', textLlistes,
+        '\nRespon NOMÉS amb un objecte JSON:',
         '{"dies":[{"dia":"AAAA-MM-DD","dinar":[{"id":"r…","titol":"…","racions":6,"congela":true}],"sopar":[{"id":"r…","titol":"…","racions":4,"congela":false}],"soparText":"Creps de pernil dolç i formatge"|"Fora"|null,"nota":"…"}],',
-        ' "platNou":{"id":"r…","titol":"…","dia":"AAAA-MM-DD","apat":"dinar|sopar","perque":"…"}|null,',
+        ' "platNouCerca":{"text":"paraules en castellà per buscar un plat nou al Cookidoo","dia":"AAAA-MM-DD","apat":"dinar|sopar","perque":"…"}|null,',
         ' "reserves":[{"k":"p12","quantitat":"2 racions","plat":"…","dia":"AAAA-MM-DD"}],',
         ' "sobres":[{"plat":"…","dia":"AAAA-MM-DD","racions":2}],',
         ' "descongelar":[{"dia":"AAAA-MM-DD (el dia ABANS del plat)","que":"…","plat":"…"}],',
         ' "peix":[{"plat":"…","dia":"AAAA-MM-DD","peix":"…","grams":600}],',
         ' "avisos":["…"]}',
-        'Dinar i sopar són llistes: [primer, segon], o un sol element si és un «Menú». «reserves» = el que el menú fa servir de l\'estoc (amb la k). «sobres» = per a cada plat de 6 racions, les que sobren (6 − persones). «descongelar» = el que s\'ha de treure del congelador la nit abans.',
+        'Dinar i sopar són llistes: [primer, segon], o un sol element si és un «Menú». «congela» = true si el plat es congela bé. «reserves» = el que el menú fa servir de l\'estoc (amb la k). «sobres» = per a cada plat de 6 racions, les que sobren (6 − persones). «descongelar» = el que s\'ha de treure del congelador la nit abans.',
       ].filter(Boolean).join('\n');
-      logMenu('Claude està triant el menú (pot trigar un parell de minuts)…');
-      const r = await sample.json(prompt, { tools: einesMenu(), modelTier: 'default' });
+      const r = await etapa('Claude tria el menú (1-2 minuts)', () => sample.json(prompt, { cache: false, onText: seguiment('Claude tria el menú') }));
       if (!r || !Array.isArray(r.dies)) throw new Error('Claude no ha tornat un menú vàlid.');
+
+      await etapa('Comprovant les receptes (llegum i racions)', () => detalls(platsDe(r).map((x) => x.r.id)));
+      let probs = problemes(r);
+      if (probs.length) {
+        await etapa('Llegint les variants de racions', () => detalls(probs.flatMap((x) => (S.menu.cache[x.r.id] || {}).variants || [])));
+        const info = probs.map((x) => ({ dia: x.d.dia, apat: x.apat, posicio: x.i, actual: { id: x.r.id, titol: x.r.titol }, motiu: x.motiu,
+          variants: ((S.menu.cache[x.r.id] || {}).variants || []).map((v) => ({ id: v, titol: (S.menu.cache[v] || {}).titol, racions: (S.menu.cache[v] || {}).racions, llegum: (S.menu.cache[v] || {}).llegum })) }));
+        const fixPrompt = [
+          'Ets el cuiner de casa d\'en Jimix. Alguns plats del menú no compleixen les regles. Per a cadascun, tria\'n un altre de les llistes (o la variant de 6 racions, si n\'hi ha) que compleixi les regles i encaixi al mateix àpat. Escriu en català.',
+          'REGLES DE CASA:', regles,
+          'PLATS A CANVIAR:', JSON.stringify(info),
+          'MENÚ ACTUAL:', JSON.stringify(r.dies),
+          'LLISTES DEL COOKIDOO (rID | títol | temps):', textLlistes,
+          'Respon NOMÉS JSON: {"canvis":[{"dia":"AAAA-MM-DD","apat":"dinar|sopar","posicio":0,"id":"r…","titol":"…","racions":6,"congela":true}]}',
+        ].join('\n');
+        const fix = await etapa(`Claude canvia ${probs.length} plat${probs.length === 1 ? '' : 's'}`, () => sample.json(fixPrompt, { cache: false, onText: seguiment('Claude canvia plats') }));
+        for (const c of (fix && fix.canvis) || []) {
+          const d = (r.dies || []).find((x) => x.dia === c.dia); if (!d || !c.id) continue;
+          const llista = d[c.apat === 'sopar' ? 'sopar' : 'dinar'] = d[c.apat === 'sopar' ? 'sopar' : 'dinar'] || [];
+          llista[Math.max(0, Math.min(Number(c.posicio) || 0, llista.length))] = { id: c.id, titol: c.titol, racions: c.racions, congela: !!c.congela };
+        }
+        await etapa('Tornant a comprovar', () => detalls(platsDe(r).map((x) => x.r.id)));
+        probs = problemes(r);
+      }
+      if (m.platNou && r.platNouCerca && r.platNouCerca.text) {
+        try {
+          const c = await etapa('Buscant un plat nou', () => n8n('cookidoo', 'cercar', { text: String(r.platNouCerca.text), mida: 12 }));
+          const meves = new Set((col.resultat || []).flatMap((l) => l.receptes.map((x) => x.id)));
+          const cands = ((c.resultat && c.resultat.receptes) || []).filter((x) => x.id && !meves.has(x.id)).slice(0, 6);
+          await detalls(cands.map((x) => x.id));
+          const bo = cands.find((x) => (S.menu.cache[x.id] || {}).llegum === false);
+          if (bo) r.platNou = { id: bo.id, titol: (S.menu.cache[bo.id] || {}).titol || bo.titol, racions: (S.menu.cache[bo.id] || {}).racions, dia: r.platNouCerca.dia, apat: r.platNouCerca.apat === 'sopar' ? 'sopar' : 'dinar', perque: r.platNouCerca.perque };
+        } catch (e) { /* el plat nou és opcional */ }
+      }
+      r.avisos = [...(r.avisos || []), ...probs.map((x) => `⚠️ ${nomDia(x.d.dia)} (${x.apat}): «${x.r.titol}» ${x.motiu}. Torna a proposar o canvia'l abans d'aplicar.`)];
       m.proposta = r; m.fase = 'proposta';
       if (db) db.doc('menus/proposta').set({ data: new Date().toISOString(), dilluns: m.dilluns, proposta: JSON.stringify(r) }).catch(() => {});
     } catch (e) {
       m.fase = 'config';
-      const codis = { not_granted: 'No has deixat que aquesta pàgina faci servir Claude.', rate_limited: 'Massa peticions a Claude: espera una mica.', invalid_json: 'Claude no ha respost en el format esperat. Torna-ho a provar.', tools_unavailable: 'Aquesta vista no admet eines de Claude: obre-la a claude.ai.' };
-      m.error = codis[e && e.code] || errText(e, 'menú');
+      const codis = { not_granted: 'No has deixat que aquesta pàgina faci servir Claude.', rate_limited: 'Massa peticions a Claude: espera una mica.', invalid_json: 'Claude no ha respost en el format esperat. Torna-ho a provar.', refused: 'Claude no ho ha volgut fer. Torna-ho a provar.' };
+      const base = codis[e && e.code] || errText(e, 'menú').replace(/^menú: /, '');
+      m.error = `${e && e.etapa ? e.etapa + ': ' : ''}${base}. Torna a tocar «Fes el menú» i deixa l'app oberta mentre treballa.`;
     }
     render();
   }
@@ -952,7 +1036,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     if (P.llista || P.carro) {
       try {
         const falten = receptesDelMenu().filter((id) => !S.menu.cache[id]);
-        if (falten.length) { const r = await n8n('cookidoo', 'receptes', { ids: falten }); for (const x of r.resultat || []) S.menu.cache[x.id] = x; }
+        if (falten.length) await ambReintent(() => detalls(falten));
         const receptes = receptesDelMenu().map((id) => { const x = S.menu.cache[id] || {}; return { id, titol: x.titol, racions: x.racions, ingredients: x.ingredients || [] }; });
         const { out } = compactaEstoc();
         const acaben = llistaCompra();
@@ -968,7 +1052,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
           'Respon NOMÉS amb JSON: {"articles":[{"seccio":"🥬","text":"Ceba – 1 kg","cerca":"cebolla"}],"peix":[{"text":"Llobarro – 600 g (dimarts, per a …)"}]}. Seccions: 🥬 verdura i fruita, 🥩 carn, ❄️ congelats, 🥛 làctics i ous, 🥫 rebost, 🥐 esmorzars, 🍞 pa, 🧴 casa. «cerca» = paraules en castellà per buscar-ho al Mercadona.',
         ].join('\n');
         if (P.llista) { P.llista.estat = 'fent'; P.llista.detall = 'Claude fa la llista…'; render(); }
-        llista = await sample.json(prompt, { cache: false });
+        llista = await ambReintent(() => sample.json(prompt, { cache: false, onText: () => {} }));
         if (!llista || !Array.isArray(llista.articles)) throw new Error('Claude no ha tornat una llista vàlida.');
       } catch (e) {
         const t = errText(e, 'llista');
@@ -988,15 +1072,15 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       await fes(P.carro, async () => {
         const consultes = [...new Set(llista.articles.map((a) => a.cerca || a.text).filter(Boolean))].slice(0, 40);
         P.carro.detall = `Cercant ${consultes.length} productes…`; render();
-        const [cerca, hab] = await Promise.all([n8n('mercadona', 'cercar', { consultes, max: 4 }), n8n('mercadona', 'habituals', {}).catch(() => ({ resultat: [] }))]);
+        const [cerca, hab] = await Promise.all([ambReintent(() => n8n('mercadona', 'cercar', { consultes, max: 4 })), n8n('mercadona', 'habituals', {}).catch(() => ({ resultat: [] }))]);
         P.carro.detall = 'Claude tria els productes…'; render();
-        const tria = await sample.json([
+        const tria = await ambReintent(() => sample.json([
           'Tria els productes del Mercadona per a aquesta llista de la compra. Respon NOMÉS JSON: {"linies":[{"id":"…","quantitat":1,"article":"…"}],"noTrobats":["…"]}.',
           'Prefereix els que compra sovint (habituals), marca Hacendado i el format que s\'acosti més a la quantitat. «quantitat» = unitats o paquets del producte (màxim 12). No hi posis peix fresc.',
           'LLISTA:', JSON.stringify(llista.articles),
           'RESULTATS DE CERCA:', JSON.stringify(cerca.resultat),
           'HABITUALS:', JSON.stringify((hab.resultat || []).slice(0, 150).map((x) => ({ id: x.id, nom: x.nom, format: x.format }))),
-        ].join('\n'), { cache: false });
+        ].join('\n'), { cache: false, onText: () => {} }));
         const linies = (tria.linies || []).filter((l) => l && l.id).map((l) => ({ id: String(l.id), quantitat: Math.max(1, Math.min(12, Math.round(Number(l.quantitat) || 1))) }));
         if (!linies.length) throw new Error('No he pogut triar cap producte.');
         await n8n('mercadona', 'posar', { linies, mode: 'minim' });
@@ -1072,7 +1156,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const claus = m.claus || {};
     const nomK = (k) => { const it = S.items.get(claus[k]); return it ? it.nom : k; };
     let html = capçal + taula
-      + (p.platNou ? `<div class="card"><h3>Plat nou</h3><div><b>${esc(p.platNou.titol)}</b> (${esc(p.platNou.id)}) · ${esc(nomDia(p.platNou.dia || m.dilluns))} ${esc(p.platNou.apat || '')}</div><div class="hint">${esc(p.platNou.perque || '')}</div></div>` : '')
+      + (p.platNou ? `<div class="card"><h3>Plat nou de la setmana</h3><div><b>${esc(p.platNou.titol)}</b> <span class="hint">(${esc(p.platNou.id)}${p.platNou.racions ? ' · ' + esc(p.platNou.racions) : ''})</span></div><div class="hint">${esc(p.platNou.perque || '')}</div>${platsDe(p).some((x) => x.r.id === p.platNou.id) ? '<div class="hint">✓ Ja és al menú.</div>' : m.fase === 'proposta' ? `<div class="row-actions"><button class="btn" type="button" id="mPlatNou">Posa'l al ${esc(p.platNou.apat || 'dinar')} de ${esc(nomDia(p.platNou.dia || m.dilluns))}</button></div>` : ''}</div>` : '')
       + llistaHtml('Treure del congelador', p.descongelar, (x) => `${esc(nomDia(x.dia))} a les 20:00: ${esc(x.que)} <span class="hint">(per a ${esc(x.plat)})</span>`)
       + llistaHtml('Reserves 📌', p.reserves, (x) => `${esc(nomK(x.k))}: ${esc(x.quantitat)} per a ${esc(x.plat)} (${esc(nomDia(x.dia))})`)
       + llistaHtml('Peix per a la Lupe', p.peix, (x) => `${esc(x.peix)} · ${esc(x.grams || '?')} g per a ${esc(x.plat)} (${esc(nomDia(x.dia))})`)
@@ -1109,6 +1193,13 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       const extra = (($('mComentari2') && $('mComentari2').value) || '').trim();
       if (extra) S.menu.comentari = [S.menu.comentari, `Canvis demanats sobre la proposta anterior: ${extra}`].filter(Boolean).join('\n');
       proposaMenu();
+    } else if (id === 'mPlatNou') {
+      const p = S.menu.proposta; const n = p && p.platNou; if (!n) return;
+      const d = (p.dies || []).find((x) => x.dia === n.dia) || (p.dies || [])[0]; if (!d) return;
+      const llista = d[n.apat] = d[n.apat] || [];
+      llista[0] = { id: n.id, titol: n.titol, racions: racionsDe(S.menu.cache[n.id]) || 4, congela: (racionsDe(S.menu.cache[n.id]) || 0) >= 6 };
+      if (n.apat === 'sopar') d.soparText = null;
+      render();
     } else if (id === 'mAplica') {
       aplicaMenu();
     } else if (id === 'mNou2') {
