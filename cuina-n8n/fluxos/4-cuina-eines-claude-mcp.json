@@ -3,8 +3,8 @@
   "nodes": [
     {
       "parameters": {
-        "authentication": "bearerAuth",
-        "path": "cuina-1394a941049a",
+        "authentication": "headerAuth",
+        "path": "cuina-83578d2719c1",
         "instructions": "Eines de la cuina d'en Jimix: Cookidoo, carro del Mercadona i calendaris d'iCloud. Normes: mai confirmis ni paguis cap comanda (l'eina del Mercadona només omple el carro); no enviïs missatges en nom seu; no buidis la llista del Cookidoo sense que formi part del procés setmanal. Totes les eines reben «accio» i «dades» (un text JSON)."
       },
       "id": "cb8db216-9949-45b7-a19c-7240078dc732",
@@ -15,11 +15,11 @@
         600,
         0
       ],
-      "webhookId": "cdaf3bca-fce2-4a88-a713-91e08c0fe4e9",
+      "webhookId": "784c287c-8f30-473f-a9b2-7cafa0585e73",
       "credentials": {
-        "httpBearerAuth": {
+        "httpHeaderAuth": {
           "id": "",
-          "name": "MCP per a Claude (token)"
+          "name": "MCP per a Claude (x-auth-token)"
         }
       }
     },
@@ -178,7 +178,7 @@
     },
     {
       "parameters": {
-        "content": "## Connector per a Claude\nExposa els 3 fluxos de cuina com a eines MCP. **Està protegit amb un token.**\n\n1. Obre la credencial «MCP per a Claude (token)» i posa-hi un token llarg i aleatori (p. ex. 40 lletres i números).\n2. Publica aquest flux.\n3. Copia la **Production URL** del node «MCP Server Trigger».\n4. A claude.ai → Configuració → Connectors → Afegeix connector personalitzat: enganxa la URL i, a les capçaleres, `Authorization` = `Bearer <el mateix token>`.",
+        "content": "## Connector per a Claude\nExposa els 3 fluxos de cuina com a eines MCP. **Està protegit amb un token.**\n\n1. Obre la credencial «MCP per a Claude (x-auth-token)»: Name `x-auth-token`, Value un token llarg i aleatori.\n2. Publica aquest flux.\n3. Copia la **Production URL** del node «MCP Server Trigger».\n4. A claude.ai → Configuració → Connectors → Afegeix connector personalitzat: «Sin inicio de sesión», enganxa la URL i, a les capçaleres, `x-auth-token` = el token.",
         "width": 560,
         "height": 280
       },

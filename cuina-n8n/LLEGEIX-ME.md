@@ -25,7 +25,7 @@ Aquests fluxos fan amb n8n les feines que ara depenen del Mac: el Cookidoo, el c
 
 **iCloud:** Apple rebutjava la contrasenya d'aplicació (error 401, també fent la prova des del Terminal). Per això s'ha canviat pel Google Calendar. El flux «Cuina · Calendari iCloud» queda sense publicar: el pots esborrar, i també la credencial «iCloud (calendari)» i l'antiga «Mercadona (token)».
 
-**Pendent:** connectar el connector MCP a claude.ai (pas 3).
+**Pendent:** afegir el connector a claude.ai (pas 3). El connector ja està publicat: rebutja les peticions sense token (403) i accepta les que porten el token (200).
 
 ## Credencials (n8n → Credentials)
 
@@ -35,7 +35,7 @@ Aquests fluxos fan amb n8n les feines que ara depenen del Mac: el Cookidoo, el c
   - Per copiar-lo sencer: a la consola del Chrome, amb `tienda.mercadona.es` oberta, escriu `copy(JSON.parse(localStorage.getItem('MO-user')).token)`.
   - Dura unes 6 setmanes.
 - **`Google Calendar (cuina)`**, tipus *Google Calendar OAuth2 API*: es connecta amb «Sign in with Google».
-- **`MCP per a Claude (token)`**, tipus *Bearer Auth*: un token llarg i aleatori que t'inventes tu.
+- **`MCP per a Claude (x-auth-token)`**, tipus *Header Auth*: Name `x-auth-token`, Value un token llarg i aleatori.
 
 Perquè els avisos de Google sonin a l'iPhone, ves a Configuració → Calendari → Comptes i afegeix-hi el compte de Google, o fes servir l'app Google Calendar.
 
@@ -44,13 +44,14 @@ Perquè els avisos de Google sonin a l'iPhone, ves a Configuració → Calendari
 > **Per provar un flux a mà**, executa'l des del node **«Prova manual»**, no des de «Publicació (no fa res)». Aquest segon activador només serveix perquè n8n deixi publicar el flux.
 
 ## 3. Connecta-ho amb Claude
-1. Obre la credencial «MCP per a Claude (token)» i posa-hi un token llarg i aleatori.
-2. Publica el flux «Cuina · Eines per a Claude (MCP)» i copia la **Production URL** del node «MCP Server Trigger».
-3. A claude.ai, ves a **Configuració → Connectors → Afegeix un connector personalitzat**:
-   - Enganxa-hi la URL.
-   - A les capçaleres, afegeix `Authorization` amb el valor `Bearer ` seguit del mateix token del pas 1.
+El connector ja està publicat i protegit amb el token de la credencial «MCP per a Claude (x-auth-token)».
 
-**Comprovat:** el connector rebutja les peticions sense token o amb un token incorrecte (error 403). La primera versió, amb OAuth, quedava oberta a la teva versió de n8n i es va tancar de seguida.
+A claude.ai, ves a **Configuració → Connectors → Afegeix un connector personalitzat**:
+- Tria **«Sin inicio de sesión»**.
+- Enganxa-hi la URL `https://jimixp.app.n8n.cloud/mcp/cuina-ccda21bc1c04`.
+- A les capçaleres, afegeix `x-auth-token` amb el token com a valor (sense «Bearer»).
+
+La primera versió, amb OAuth, quedava oberta a la teva versió de n8n i es va tancar de seguida.
 
 ## Riscos coneguts
 - **Totes dues són API internes no oficials:** el Cookidoo i el Mercadona les poden canviar sense avís.
