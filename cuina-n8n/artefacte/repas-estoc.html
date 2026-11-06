@@ -406,6 +406,12 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   }
   const valor = (it, camp) => (camp in it.edit ? it.edit[camp] : it.orig[camp]);
   const brut = (it) => Object.keys(it.edit).some((k) => it.edit[k] !== it.orig[k]);
+  // Sense estoc: la quantitat comença per 0 i no suma res més («0 paquet», «0 caps»…). «0 L al rebost + 1 brick» sí que en té.
+  // Només s'amaga si era a zero en llegir-ho i encara ho és (així no desapareix res mentre l'edites).
+  const esZero = (q) => { const t = String(q == null ? '' : q).trim().toLowerCase(); return /^0+([.,]0+)?(\s|$)/.test(t) && !/\+/.test(t); };
+  const senseEstoc = (it) => (it.zona === 'congelador'
+    ? Number(it.orig.racions) <= 0 && Number(valor(it, 'racions')) <= 0
+    : esZero(it.orig.quantitat) && esZero(valor(it, 'quantitat')));
   function edita(it, camp, v) {
     if (v === it.orig[camp]) delete it.edit[camp]; else it.edit[camp] = v;
     it.desat = false; it.errorDesar = '';
@@ -430,7 +436,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   function comptes() {
     const c = { nevera: 0, rebost: 0, congelador: 0 };
     const ch = { nevera: 0, rebost: 0, congelador: 0, fruita: 0 };
-    for (const it of S.items.values()) { c[it.zona]++; if (brut(it)) ch[it.zona]++; }
+    for (const it of S.items.values()) { if (!senseEstoc(it)) c[it.zona]++; if (brut(it)) ch[it.zona]++; }
     for (const n of S.nous) ch[n.zona] = (ch[n.zona] || 0) + 1;
     if (Object.keys(S.fruita).length) ch.fruita = 1;
     return { c, ch };
@@ -461,6 +467,10 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const items = [...S.items.values()].filter((it) => it.zona === zona)
       .filter((it) => !f || it.nom.toLowerCase().includes(f) || it.grup.toLowerCase().includes(f))
       .filter((it) => zona === 'congelador' || !S.nomesAcaba || valor(it, 'sacaba'));
+    // Els productes a zero no surten, llevat que els busquis, filtris pel que s'acaba o demanis veure'ls
+    const esgotats = items.filter(senseEstoc);
+    const mostraEsgotats = !!f || S.nomesAcaba || S.veureEsgotats;
+    if (!mostraEsgotats) { for (const it of esgotats) items.splice(items.indexOf(it), 1); }
     const grups = new Map();
     for (const it of items) { if (!grups.has(it.grup)) grups.set(it.grup, []); grups.get(it.grup).push(it); }
     const ordre = zona === 'congelador' ? TIPUS : CATEGORIES;
@@ -472,6 +482,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const nousZona = S.nous.filter((n) => n.zona === zona);
     if (nousZona.length) html += `<div class="group"><h3>Afegint a Notion</h3>${nousZona.map((n) => `<div class="item ${n.estat === 'error' ? 'error' : 'dirty'}"><div class="name"><strong>${esc(n.nom)}</strong><div class="meta"><span class="tag">${esc(n.grup)}</span></div><div class="estat">${n.estat === 'error' ? '⚠️ ' + esc(n.error || 'No s\'ha pogut afegir') : 'Desant…'}</div></div><div class="ctrl"><span class="num">${esc(zona === 'congelador' ? n.racions + ' rac.' : n.quantitat)}</span>${n.estat === 'error' ? `<button class="iconbtn" type="button" data-reintenta-nou="${n.k}">Torna-ho a provar</button><button class="iconbtn" type="button" data-treu-nou="${n.k}">Treu</button>` : ''}</div></div>`).join('')}</div>`;
     if (!items.length && !S.carregant) html += `<div class="group"><div class="empty">${f || S.nomesAcaba ? 'Cap producte coincideix amb el filtre.' : 'No hi ha res apuntat aquí.'}</div></div>`;
+    if (esgotats.length && !f && !S.nomesAcaba) html += `<div class="row-actions"><button class="btn" type="button" id="veureEsgotats">${S.veureEsgotats ? 'Amaga els esgotats' : `Mostra els esgotats (${esgotats.length})`}</button></div>`;
     html += renderAfegir(zona);
     return html;
   }
@@ -483,6 +494,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const tags = [];
     if (reserves.length) tags.push(`<span class="tag res" title="${esc(reserves.join(' · '))}">📌 reservat</span>`);
     if (/⚠️/.test(it.nom + it.notes)) tags.push('<span class="tag leg">⚠️ llegum</span>');
+    if (senseEstoc(it)) tags.push('<span class="tag">esgotat</span>');
     if (it.data) tags.push(`<span class="tag num">${esc(it.data.split('-').reverse().slice(0, 2).join('-'))}</span>`);
     let ctrl;
     if (it.zona === 'congelador') {
@@ -567,6 +579,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     S.tab = b.dataset.tab; S.filtre = ''; store.set('repas.tab', S.tab); render(); window.scrollTo({ top: 0 });
   });
   $('panel').addEventListener('click', (e) => {
+    if (e.target.id === 'veureEsgotats') { S.veureEsgotats = !S.veureEsgotats; render(); return; }
     const ends = e.target.closest('[data-ends]');
     if (ends) { const it = S.items.get(ends.dataset.ends); edita(it, 'sacaba', !valor(it, 'sacaba')); render(); return; }
     const qp = e.target.closest('[data-qpas]');
