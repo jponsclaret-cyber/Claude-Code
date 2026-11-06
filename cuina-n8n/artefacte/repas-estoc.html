@@ -248,9 +248,11 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   };
   const CATEGORIES = ['Làctics i ous', 'Verdura bàsica', 'Esmorzars', 'Arròs i pasta', 'Farines i pa ratllat', 'Olis i vinagres', 'Espècies', 'Brous', 'Conserves', 'Licors de cuina', 'Pa i galetes', 'Casa', 'Altres'];
   const TIPUS = ['Plat cuinat', 'Croquetes', 'Carn', 'Peix', 'Verdura', 'Brou i salses', 'Pa i masses', 'Altres'];
-  // Coses que no li agraden: mai als menús (es comprova al títol i als ingredients)
-  const NO_AGRADEN = ['sardines'];
-  const NO_AGRADEN_RE = /sardin/i;
+  // Regles de casa: a la pàgina de Notion «Regles de cuina», que edita en Jimix. Es llegeixen cada vegada que es fa el menú.
+  const REGLES_PAGE = '4107a224ec238181b1b9db7ac379f287';
+  // Coses que no li agraden (de la secció «No m'agraden» de les regles): es comproven al títol i als ingredients
+  let NO_AGRADEN = ['sardines'];
+  let NO_AGRADEN_RE = /sardin/i;
   const FRUITES = ['Taronges', 'Mandarines', 'Plàtans', 'Kiwis', 'Raïm', 'Pomes', 'Peres', 'Llimones', 'Bossetes de fruita triturada'];
   const ZONES = [
     { id: 'nevera', nom: 'Nevera' },
@@ -889,24 +891,34 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
 
   function reglesCasa(m) {
     return [
-      `Persones a cada àpat (0 = no mengen a casa: no hi posis cap plat i escriu "Fora" a dinarText/soparText): ${JSON.stringify(taulaPersones(m))}`,
-      'Àpats amb poques persones (1 o 2): abans de cuinar res, fes servir racions del congelador que hi encaixin (plats cuinats, sobres d\'altres setmanes). Posa-ho a «dinarText» o «soparText» com «🧊 [plat] (congelador)», afegeix-ho a «reserves» (amb la k i les racions) i a «descongelar» (el vespre abans). Si no n\'hi ha cap que encaixi, posa-hi un plat normal i que les sobres serveixin per a un altre àpat.',
-      'CAP LLEGUM (intolerància): ni llenties, cigrons, mongetes, pèsols, mongeta tendra, soja/tofu, cacauet, faves. Comprova SEMPRE cada recepta amb l\'eina «receptes»: «llegum» ha de ser false. La soja dins de botifarres o embotits sí que es pot. Els productes marcats ⚠️ a l\'estoc no s\'han de fer servir mai.',
-      'Sempre primer i segon, a dinar i a sopar. Un «Menú» del Cookidoo (diversos plats alhora amb el Varoma) compta com a primer i segon.',
-      'Sopars: sempre un «Menú» del Cookidoo (llista 00 MENU SOPAR o similars). Dilluns sopar: creps de pernil dolç i formatge (plat únic, NO és cap recepta: posa-ho a «soparText»). Dimecres sopar: un menú amb truita (p. ex. r150861). Divendres, dissabte i diumenge NO sopen a casa («soparText»: "Fora").',
-      'Menús de sopar sense llegum ja comprovats: r45051, r449153, r150861, r55769, r111056, r34721, r562826, r929155, r716986, r802047, r721284, r699200, r145066, r29525.',
-      m.findeCasa ? 'Dinars del cap de setmana: dinen a casa. Un dels dos dies, un arròs (p. ex. una paella de 03 DINAR FINDE).' : 'Dinars del cap de setmana: NO dinen a casa (no hi posis res).',
-      'La verdura va al sopar. Als dinars: arròs, pasta, carn, guisats…',
-      'Les cremes (de verdura, de carbassa, de xampinyons…) normalment van al SOPAR, no al dinar.',
-      `Coses que NO li agraden (no les posis mai, ni com a ingredient principal): ${NO_AGRADEN.join(', ')}.`,
-      'Racions: plat que es congela bé (guisats, carn amb salsa, cremes, mandonguilles) → variant de 6 racions (les sobres van al congelador). Plat que no es congela (arròs, pasta, peix, ous, truita, patata a trossos) → 4 racions (o les persones). Tria la variant de racions bona (cada variant té un rID propi); mai «fes-ne la meitat».',
-      'Ordre de gastar (molt important): ABANS de comprar res de nou, fes servir el que ja hi ha. Primer el que es fa malbé a la nevera (mira «notes»: «gastar aviat», «obert»…), després el congelador: el més antic primer («congelat» = data de congelació) i el que n\'hi ha més. Posa sobres congelades (plats cuinats) a 2 o 3 dinars de la setmana. Si un plat necessita carn o peix que ja és al congelador, tria aquest plat abans que un que obligui a comprar-ne. Els productes amb ⚠️ a «notes» no es fan servir mai.',
-      'NO ES REPETEIX CAP RECEPTA en tres setmanes com a mínim: no triïs cap recepta (ni cap variant del mateix plat) de la llista «RECEPTES JA FETES» que et passo. Només es repeteixen el iogurt r55133 i els creps de dilluns (que no són cap recepta). Els menús de sopar «ja comprovats» no són excusa per repetir: si te\'n queden pocs, tria\'n d\'altres de les llistes de menús de sopar (la pàgina en comprova el llegum).',
-      'Peix fresc: es compra a la Lupe el dilluns i arriba dimarts. Els plats de peix fresc, dimarts o dimecres. Peix barat (maira, seitó, sardina, bonítol, orada, verat, llobarro, calamarcets, musclo).',
-      'No repeteixis plats dins la setmana. Fes servir les llistes de la família; mira els temps (entre setmana, plats de menys d\'una hora).',
+      `Persones a cada àpat AQUESTA SETMANA (0 = no mengen a casa: no hi posis cap plat i escriu "Fora" a dinarText/soparText): ${JSON.stringify(taulaPersones(m))}`,
+      'Àpats d\'1 o 2 persones: racions del congelador que hi encaixin. Posa-ho a «dinarText» o «soparText» com «🧊 [plat] (congelador)», afegeix-ho a «reserves» (amb la k i les racions) i a «descongelar» (el vespre abans). Si no n\'hi ha cap que encaixi, posa-hi un plat normal i que les sobres serveixin per a un altre àpat.',
+      'Format: el sopar de dilluns (creps) va a «soparText»; els sopars de divendres a diumenge, «soparText»: "Fora".',
+      m.findeCasa ? 'Aquesta setmana els dinars del cap de setmana SÓN a casa.' : 'Aquesta setmana els dinars del cap de setmana NO són a casa (no hi posis res).',
+      'No repetir: no triïs cap recepta (ni cap variant del mateix plat) de la llista «RECEPTES JA FETES» que et passo.',
+      'Comprova SEMPRE cada recepta amb l\'eina «receptes»: «llegum» ha de ser false.',
       m.platNou && m.nou && m.nou.triat ? `Plat nou JA TRIAT I APROVAT per en Jimix: ${m.nou.triat.id} | ${m.nou.triat.titol}. Posa\'l (amb aquest rID exacte) a l\'àpat on millor encaixi i no busquis cap altre plat nou (platNouCerca: null).` : m.platNou ? 'Plat nou: proposa UN plat que no sigui a cap de les seves llistes (cerca\'l amb «cercar_receptes»), que compleixi les regles i encaixi en un àpat concret. Marca\'l a «platNou».' : 'Aquesta setmana no cal plat nou.',
-    ].map((x) => '- ' + x).join('\n');
+    ].map((x) => '- ' + x).join('\n')
+      + '\n\nREGLES DE CASA (pàgina de Notion «Regles de cuina»: les escriu en Jimix i MANEN sobre tot):\n' + (S.regles || '(no s\'han pogut llegir)');
   }
+
+  // Llegeix la pàgina «Regles de cuina» de Notion i n'extreu les coses que no li agraden
+  const normTxt = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  async function llegeixRegles() {
+    const r = await ambReintent(() => mcp.callTool(NOTION, 'notion-fetch', { id: REGLES_PAGE }, { cache: false }));
+    const p = payloadDe(r);
+    let t = typeof p === 'string' ? p : (p && (p.text || p.content)) || '';
+    const c = t.match(/<content>([\s\S]*?)<\/content>/); if (c) t = c[1];
+    t = t.replace(/<\/?b>/g, '**').trim();
+    if (t.length < 80) throw new Error('No puc llegir les regles de cuina de Notion (pàgina «Regles de cuina»).');
+    const sec = t.split(/\n(?=#)/).find((x) => /^#+[^\n]*agraden/i.test(x));
+    NO_AGRADEN = sec ? sec.split('\n').slice(1).map((l) => l.replace(/^\s*[-*]\s*/, '').replace(/\*\*/g, '').trim()).filter((l) => l && !l.startsWith('#')) : [];
+    const arrels = NO_AGRADEN.map((x) => { const n = normTxt(x).replace(/[^a-z ]/g, '').trim(); return n.length > 5 ? n.slice(0, n.length - 2) : n; }).filter(Boolean);
+    NO_AGRADEN_RE = arrels.length ? new RegExp(arrels.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i') : /(?!)/;
+    S.regles = t;
+    return t;
+  }
+  const noAgrada = (t) => NO_AGRADEN_RE.test(normTxt(t));
 
   // Reintenta una vegada els errors de connexió (lectures i peticions a Claude)
   async function ambReintent(fn) {
@@ -951,7 +963,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
       if (!det) { out.push({ ...x, motiu: 'no he pogut llegir la recepta' }); continue; }
       const rc = S.menu.recents;
       if (rc && x.r.id !== 'r55133' && (rc.ids.has(x.r.id) || rc.titols.has(normTitol(det.titol)))) { out.push({ ...x, motiu: 'ja s\'ha fet o és planificada fa menys de tres setmanes: no es pot repetir' }); continue; }
-      if (NO_AGRADEN_RE.test(det.titol || '') || (det.ingredients || []).some((i) => NO_AGRADEN_RE.test(i))) { out.push({ ...x, motiu: `porta ${NO_AGRADEN.join('/')}, que no li agraden` }); continue; }
+      if (noAgrada(det.titol) || (det.ingredients || []).some((i) => noAgrada(i))) { out.push({ ...x, motiu: `porta ${NO_AGRADEN.join('/')}, que no li agraden` }); continue; }
       if (det.llegum !== false) { out.push({ ...x, motiu: Array.isArray(det.llegum) ? 'porta llegum: ' + det.llegum.join(', ') : 'no sé si porta llegum' }); continue; }
       const rac = racionsDe(det);
       if (x.r.congela && rac && rac < 6 && (det.variants || []).length) out.push({ ...x, motiu: `és de ${rac} racions i s'hauria de fer de 6` });
@@ -982,6 +994,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     m.nou.buscant = true; m.nou.error = ''; m.nou.cands = []; render();
     try {
       if (!mcp || !sample) throw new Error('Aquesta vista no pot fer servir Claude ni els connectors.');
+      await llegeixRegles();
       const col = await ambReintent(() => n8n('cookidoo', 'colleccions', {}));
       const meves = new Set((col.resultat || []).flatMap((l) => (l.receptes || []).map((x) => x.id)));
       const recents = await ambReintent(() => llegeixRecents(m));
@@ -1002,14 +1015,14 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
         try {
           const r = await n8n('cookidoo', 'cercar', { text: String(c.text), mida: 12 });
           for (const x of (r.resultat && r.resultat.receptes) || []) {
-            if (!x.id || meves.has(x.id) || vistos.has(x.id) || recents.ids.has(x.id) || recents.titols.has(normTitol(x.titol)) || NO_AGRADEN_RE.test(x.titol || '') || cands.some((y) => y.id === x.id)) continue;
+            if (!x.id || meves.has(x.id) || vistos.has(x.id) || recents.ids.has(x.id) || recents.titols.has(normTitol(x.titol)) || noAgrada(x.titol) || cands.some((y) => y.id === x.id)) continue;
             cands.push({ id: x.id, titol: x.titol, perque: c.perque || '' });
             if (cands.filter((y) => y.perque === c.perque).length >= 2) break;
           }
         } catch (e) { /* una cerca que falla no atura les altres */ }
       }
       await detalls(cands.map((x) => x.id));
-      const bons = cands.filter((x) => { const d = S.menu.cache[x.id] || {}; return d.llegum === false && !(d.ingredients || []).some((i) => NO_AGRADEN_RE.test(i)); }).slice(0, 3)
+      const bons = cands.filter((x) => { const d = S.menu.cache[x.id] || {}; return d.llegum === false && !(d.ingredients || []).some((i) => noAgrada(i)); }).slice(0, 3)
         .map((x) => ({ ...x, titol: (S.menu.cache[x.id] || {}).titol || x.titol, racions: (S.menu.cache[x.id] || {}).racions || '', temps: (S.menu.cache[x.id] || {}).tempsTotalMin || '' }));
       if (!bons.length) throw new Error('No he trobat cap plat nou que compleixi les regles. Torna-ho a provar.');
       m.nou.cands = bons; m.nou.vistos = [...vistos, ...bons.map((x) => x.id)];
@@ -1023,6 +1036,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     try {
       if (!mcp) throw new Error('Aquesta vista no pot fer servir els connectors.');
       if (!sample) throw new Error('Claude no està disponible en aquesta vista.');
+      await etapa('Llegint les regles de cuina (Notion)', () => llegeixRegles());
       const col = await etapa('Llegint les teves llistes del Cookidoo', () => n8n('cookidoo', 'colleccions', {}));
       const textLlistes = textLlistesDe(col);
       const recents = await etapa('Mirant què has cuinat les setmanes veïnes', () => llegeixRecents(m));

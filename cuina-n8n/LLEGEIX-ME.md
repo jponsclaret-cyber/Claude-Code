@@ -62,6 +62,12 @@ El botó crida l'eina `segon_pla` del connector «Cuina n8n». El flux `5-cuina-
 - **Credencial:** «Claude · tasca Cuina segon pla (token)», tipus *Bearer Auth*. És el token de l'API de la tasca (`sk-ant-oat01-…`). Si el regeneres a claude.ai, actualitza'l aquí.
 - Gasta l'ús del teu pla de Claude, com un xat llarg.
 
+## Regles de cuina (Notion)
+Totes les regles i preferències de casa són a la pàgina de Notion **«🍳 Regles de cuina»** (dins d'«Estoc de casa»): salut, coses que no agraden, com són els àpats, la setmana, racions, no repetir (3 setmanes), ordre de gastar, plat nou, peix, compra i avisos.
+- La pàgina de cuina i la tasca del segon pla la llegeixen cada vegada. Si no la poden llegir, no fan res.
+- Per canviar una regla, edita-la allà: no cal tocar ni n8n ni l'artefacte.
+- Excepció: la skill del Mac (`menu-setmanal`) no la llegeix.
+
 ## Riscos coneguts
 - **Totes dues són API internes no oficials:** el Cookidoo i el Mercadona les poden canviar sense avís.
 - **El token del Mercadona caduca** cada 6 setmanes aproximadament. El flux t'avisa amb un missatge clar.
