@@ -253,7 +253,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   // Coses que no li agraden (de la secció «No m'agraden» de les regles): es comproven al títol i als ingredients
   let NO_AGRADEN = ['sardines'];
   let NO_AGRADEN_RE = /sardin/i;
-  const FRUITES = ['Taronges', 'Mandarines', 'Plàtans', 'Kiwis', 'Raïm', 'Pomes', 'Peres', 'Llimones', 'Bossetes de fruita triturada'];
+  const FRUITES = ['Taronges', 'Mandarines', 'Plàtans', 'Kiwis', 'Pomes', 'Peres', 'Llimones', 'Raïm', 'Bossetes de fruita triturada'];
   const ZONES = [
     { id: 'nevera', nom: 'Nevera' },
     { id: 'rebost', nom: 'Rebost' },
@@ -528,7 +528,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
   function renderFruita() {
     const opt = (f, v, label) => `<button type="button" class="${v}" data-fruit="${esc(f)}" data-v="${v}" aria-pressed="${S.fruita[f] === v}">${label}</button>`;
     return `<div class="zonehead"><h2>Fruita</h2></div>
-      <p class="hint">Notion no porta la fruita. Digues què en queda i la sumo a la compra (unes 9-10 kg per setmana).</p>
+      <p class="hint">Notion no porta la fruita. Digues què en queda i la sumo a la compra (la quantitat setmanal és a «Regles de cuina»).</p>
       <div class="group">${FRUITES.map((f) => `<div class="fruit"><strong>${esc(f)}</strong><div class="seg">${opt(f, 'no', 'No en queda')}${opt(f, 'poca', 'Poca')}${opt(f, 'prou', 'Prou')}</div></div>`).join('')}
       <div class="add"><input id="fruitaNota" placeholder="Alguna cosa més? (p. ex. «els plàtans són molt madurs»)" value="${esc(S.fruitaNota)}"></div></div>`;
   }
@@ -1170,6 +1170,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     let llista = null;
     if (P.llista || P.carro) {
       try {
+        if (!S.regles) await llegeixRegles();
         const falten = receptesDelMenu().filter((id) => !S.menu.cache[id]);
         if (falten.length) await ambReintent(() => detalls(falten));
         const receptes = receptesDelMenu().map((id) => { const x = S.menu.cache[id] || {}; return { id, titol: x.titol, racions: x.racions, ingredients: x.ingredients || [] }; });
@@ -1181,8 +1182,9 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
           'RECEPTES AMB INGREDIENTS:', JSON.stringify(receptes),
           'ESTOC (resta el que ja hi ha amb quantitat suficient):', JSON.stringify(out),
           `S'ACABA (s'ha de comprar): ${JSON.stringify(acaben.acaben)}`,
-          `FRUITA que cal comprar (unes 9-10 kg per setmana en total, segons el que queda): ${JSON.stringify(acaben.fruita)}${S.fruitaNota ? ' · Nota: ' + S.fruitaNota : ''}`,
-          'FIXOS CADA SETMANA: 1 bossa d\'enciam, 1 paquet de mozzarella en boletes, tomàquets d\'amanida; pernil dolç i formatge a llesques per a les creps de dilluns (a part dels de l\'esmorzar); esmorzars (pernil salat, pernil dolç, formatge a llesques, tomàquets de sucar, pa) si a l\'estoc s\'acaben; per al iogurt de dilluns: 1 L de llet i 1 iogurt natural amb bífidus.',
+          `FRUITA (què en queda; la quantitat setmanal i les fruites, segons les regles): ${JSON.stringify(acaben.fruita)}${S.fruitaNota ? ' · Nota: ' + S.fruitaNota : ''}`,
+          'Afegeix els FIXOS DE CADA SETMANA, l\'ESMORZAR i la FRUITA tal com diu la secció «Compra» de les REGLES DE CASA d\'aquí sota (si l\'estoc ja en té prou, no els posis).',
+          'REGLES DE CASA (pàgina de Notion «Regles de cuina», manen):', S.regles || '(no s\'han pogut llegir)',
           'Ajunta ingredients que són el mateix (ous, llet, formatges, cebes…), suma quantitats i arrodoneix a formats de supermercat. El peix fresc NO va al Mercadona: posa\'l a «peix».',
           'Respon NOMÉS amb JSON: {"articles":[{"seccio":"🥬","text":"Ceba – 1 kg","cerca":"cebolla"}],"peix":[{"text":"Llobarro – 600 g (dimarts, per a …)"}]}. Seccions: 🥬 verdura i fruita, 🥩 carn, ❄️ congelats, 🥛 làctics i ous, 🥫 rebost, 🥐 esmorzars, 🍞 pa, 🧴 casa. «cerca» = paraules en castellà per buscar-ho al Mercadona.',
         ].join('\n');
