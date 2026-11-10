@@ -1073,9 +1073,10 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
         ' "reserves":[{"k":"p12","quantitat":"2 racions","plat":"…","dia":"AAAA-MM-DD"}],',
         ' "sobres":[{"plat":"…","dia":"AAAA-MM-DD","racions":2}],',
         ' "descongelar":[{"dia":"AAAA-MM-DD (el dia ABANS del plat)","que":"…","plat":"…"}],',
+        ' "congelar":[{"que":"carn picada (250 g)","plat":"macarrons bolonyesa de diumenge"}],',
         ' "peix":[{"plat":"…","dia":"AAAA-MM-DD","peix":"…","grams":600}],',
         ' "avisos":["…"]}',
-        'Dinar i sopar són llistes: [primer, segon], o un sol element si és un «Menú». «congela» = true si el plat es congela bé. «reserves» = el que el menú fa servir de l\'estoc (amb la k). «sobres» = per a cada plat de 6 racions, les que sobren (6 − persones d\'aquell àpat). «descongelar» = el que s\'ha de treure del congelador la nit abans.',
+        'Dinar i sopar són llistes: [primer, segon], o un sol element si és un «Menú». «congela» = true si el plat es congela bé. «reserves» = el que el menú fa servir de l\'estoc (amb la k). «sobres» = per a cada plat de 6 racions, les que sobren (6 − persones d\'aquell àpat). «descongelar» = el que s\'ha de treure del congelador la nit abans. «congelar» = la carn i el peix FRESCOS que s\'han de comprar per a plats de dijous o més tard: s\'han de congelar el dilluns que arriba la compra (posa\'ls també a «descongelar» la nit abans del plat).',
       ].filter(Boolean).join('\n');
       const r = await etapa('Claude tria el menú (1-2 minuts)', () => sample.json(prompt, { cache: false, onText: seguiment('Claude tria el menú') }));
       if (!r || !Array.isArray(r.dies)) throw new Error('Claude no ha tornat un menú vàlid.');
@@ -1249,6 +1250,10 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
 
     await fes(P.calendari, async () => {
       const esdeveniments = (p.descongelar || []).map((d) => ({ titol: `❄️ Treure del congelador: ${d.que}`, inici: `${d.dia}T20:00`, durada_min: 10, descripcio: `Passa-ho a la nevera per a ${d.plat}.`, alarma: true }));
+      if ((p.congelar || []).length) {
+        esdeveniments.push({ titol: `🧊 Congela avui (compra): ${p.congelar.map((x) => x.que).join(', ')}`.slice(0, 250), inici: `${m.dilluns}T13:30`, durada_min: 10, alarma: true,
+          descripcio: 'Carn i peix frescos que no es mengen fins a dijous o més tard:\n' + p.congelar.map((x) => `- ${x.que}: per a ${x.plat}`).join('\n') });
+      }
       if ((p.peix || []).length) {
         esdeveniments.push({ titol: '🐟 Passa\'m la llista de la Lupe al Claude', inici: `${m.dilluns}T20:15`, durada_min: 10, alarma: true,
           descripcio: 'Peix de la setmana (per a 4):\n' + p.peix.map((x) => `- ${x.peix}: ${x.grams || '?'} g per a ${x.plat} (${nomDia(x.dia)})`).join('\n') });
@@ -1308,7 +1313,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
           <label class="toggle"><input type="checkbox" data-fer="llista" ${m.fer.llista ? 'checked' : ''}> Refer la llista de la compra (esborra l'actual)</label>
           <label class="toggle"><input type="checkbox" data-fer="carro" ${m.fer.carro ? 'checked' : ''}> Omplir el carro del Mercadona</label>
           <label class="toggle"><input type="checkbox" data-fer="notion" ${m.fer.notion ? 'checked' : ''}> Reserves 📌 i sobres ⏳ a Notion</label>
-          <label class="toggle"><input type="checkbox" data-fer="calendari" ${m.fer.calendari ? 'checked' : ''}> Avisos de descongelar i de la Lupe</label>
+          <label class="toggle"><input type="checkbox" data-fer="calendari" ${m.fer.calendari ? 'checked' : ''}> Avisos de congelar, descongelar i de la Lupe</label>
         </div>
         ${m.encarregat ? `<div class="notice">✓ Encarregat a les ${esc(m.encarregat)}. Pots tancar l'app: et sonarà una notificació quan acabi (uns 10-20 min).${m.sessio ? ` <a href="${esc(m.sessio)}" target="_blank" rel="noopener">Mira com va</a>` : ''}</div>` : ''}
         ${m.error ? `<div class="notice bad">${esc(m.error)}</div>` : ''}
@@ -1326,6 +1331,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
     const nomK = (k) => { const it = S.items.get(claus[k]); return it ? it.nom : k; };
     let html = capçal + taula
       + (p.platNou ? `<div class="card"><h3>Plat nou de la setmana</h3><div><b>${esc(p.platNou.titol)}</b> <span class="hint">(${esc(p.platNou.id)}${p.platNou.racions ? ' · ' + esc(p.platNou.racions) : ''})</span></div><div class="hint">${esc(p.platNou.perque || '')}</div>${platsDe(p).some((x) => x.r.id === p.platNou.id) ? '<div class="hint">✓ Ja és al menú.</div>' : m.fase === 'proposta' ? `<div class="row-actions"><button class="btn" type="button" id="mPlatNou">Posa'l al ${esc(p.platNou.apat || 'dinar')} de ${esc(nomDia(p.platNou.dia || m.dilluns))}</button></div>` : ''}</div>` : '')
+      + llistaHtml('Congela el dia de la compra (dilluns)', p.congelar, (x) => `${esc(x.que)} <span class="hint">(per a ${esc(x.plat)})</span>`)
       + llistaHtml('Treure del congelador', p.descongelar, (x) => `${esc(nomDia(x.dia))} a les 20:00: ${esc(x.que)} <span class="hint">(per a ${esc(x.plat)})</span>`)
       + llistaHtml('Reserves 📌', p.reserves, (x) => `${esc(nomK(x.k))}: ${esc(x.quantitat)} per a ${esc(x.plat)} (${esc(nomDia(x.dia))})`)
       + llistaHtml('Peix per a la Lupe', p.peix, (x) => `${esc(x.peix)} · ${esc(x.grams || '?')} g per a ${esc(x.plat)} (${esc(nomDia(x.dia))})`)
@@ -1337,7 +1343,7 @@ pre.copy { margin: 0; white-space: pre-wrap; font: .85rem/1.5 var(--f-data); bac
         ${ck('llista', 'Refer la llista de la compra del Cookidoo (s\'esborra i s\'escriu de nou)')}
         ${ck('carro', 'Omplir el carro del Mercadona (no paga res)')}
         ${ck('notion', 'Apuntar reserves 📌 i sobres ⏳ a Notion')}
-        ${ck('calendari', 'Crear els avisos de descongelar i el de la Lupe')}
+        ${ck('calendari', 'Crear els avisos de congelar, descongelar i el de la Lupe')}
         <div class="row-actions"><button class="btn primary" type="button" id="mAplica">Aplica-ho</button><button class="btn" type="button" id="mRefes">Torna a proposar</button></div>
         <textarea id="mComentari2" placeholder="Si el tornes a proposar: què vols canviar?" style="width:100%;min-height:56px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--bg)"></textarea></div>`;
     } else {
